@@ -6,6 +6,9 @@
 #include "shop.h"
 #include "appdata.h"
 #include "steam.h"
+#include "ioext.h"
+#include "string_extras.h"
+#include "world_io_legacy.h"
 
 static char prfName[64];
 static byte firstTime;
@@ -14,28 +17,42 @@ byte modeShopNum[10];
 
 void ApplyControlSettings()
 {
-	SetKeyboardBindings(0, 6, profile.control[0]);
-	SetKeyboardBindings(1, 6, profile.control[1]);
-	SetJoystickBindings(2, profile.joyCtrl);
+	for (int i = 0; i < 2; ++i)
+	{
+		byte control[8];
+		memcpy(&control[0], &profile.control[i], 6);
+		memcpy(&control[6], &profile.progress.moreControl[i], 2);
+		SetKeyboardBindings(i, 7, control);
+	}
+
+	byte joyControl[4] = {
+		profile.joyCtrl[0],
+		profile.joyCtrl[1],
+		profile.progress.moreJoyCtrl[0],
+		profile.progress.moreJoyCtrl[1],
+	};
+	// Only 3 so the Android version doesn't show a 4th button that does nothing.
+	SetJoystickBindings(3, joyControl);
 }
 
 void InitProfile(void)
 {
-	FILE *f;
 	char name[16];
 	int i;
 
 	firstTime=0;
-	f=AppdataOpen("profile.cfg");
-	if(!f)
 	{
-		firstTime=1;	// ask the player to enter their name
-		profile.sound=255;
-		profile.music=128;
-		return;
+		auto f = AppdataOpen("profile.cfg");
+		if(!f)
+		{
+			firstTime=1;	// ask the player to enter their name
+			profile.sound=255;
+			profile.music=128;
+			return;
+		}
+		SdlRwStream stream(f.get());
+		stream.getline(name, std::size(name));
 	}
-	fscanf(f,"%s\n",name);
-	fclose(f);
 	LoadProfile(name);
 	ApplyControlSettings();
 
@@ -63,78 +80,77 @@ void FreeProfile(void)
 	}
 }
 
-void SavePlayLists(FILE *f)
+void SavePlayLists(SDL_RWops *f)
 {
 	int i;
 
 	for(i=0;i<NUM_PLAYLISTS;i++)
 	{
-		fwrite(&profile.playList[i].numSongs,1,sizeof(byte),f);
+		SDL_RWwrite(f,&profile.playList[i].numSongs,1,sizeof(byte));
 		if(profile.playList[i].numSongs>0)
-			fwrite(profile.playList[i].song,SONGNAME_LEN,profile.playList[i].numSongs,f);
+			SDL_RWwrite(f,profile.playList[i].song,SONGNAME_LEN,profile.playList[i].numSongs);
 	}
 }
 
 void SaveProfile(void)
 {
-	FILE *f;
 	int i,j;
 
-	f=AppdataOpen("profile.cfg");
-	fprintf(f,"%s\n",profile.name);
-	fclose(f);
+	auto f = AppdataOpen_Write("profile.cfg");
+	SDL_RWprintf(f.get(), "%s\n", profile.name);
+	f.reset();
 
 	sprintf(prfName,"profiles/%s.prf",profile.name);
 	// also actually save the profile!
-	f=AppdataOpen_Write(prfName);
+	f = AppdataOpen_Write(prfName);
 	// begin fwrite(&profile, sizeof(profile_t), 1, f) emulation
-	fwrite(&profile, 68, 1, f);
+	SDL_RWwrite(f, &profile, 68, 1);
 	for(i = 0; i < NUM_PLAYLISTS; ++i)
 	{
-		fwrite("\0\0\0\0\0\0\0\0", 8, 1, f);
+		SDL_RWwrite(f, "\0\0\0\0\0\0\0\0", 8, 1);
 	}
-	fwrite(&profile.difficulty, 8, 1, f);
+	SDL_RWwrite(f, &profile.difficulty, 8, 1);
 	// begin progress_t part
 	{
-		fwrite(&profile.progress, 112, 1, f);
-		fwrite("\0\0\0\0", 4, 1, f);  // skip worldData_t *world
-		fwrite(&profile.progress.kills, 2152 - 112 - 4, 1, f);
+		SDL_RWwrite(f, &profile.progress, 112, 1);
+		SDL_RWwrite(f, "\0\0\0\0", 4, 1);  // skip worldData_t *world
+		SDL_RWwrite(f, &profile.progress.kills, 2152 - 112 - 4, 1);
 	}
 	// end progress_t part
-	fwrite(&profile.motd, sizeof(profile.motd), 1, f);
-	SDL_assert(ftell(f) == 3284);
+	SDL_RWwrite(f, &profile.motd, sizeof(profile.motd), 1);
+	SDL_assert(SDL_RWtell(f) == 3284);
 	// end fwrite emulation
 
-	SavePlayLists(f);
+	SavePlayLists(f.get());
 
 	// to enforce the "TEST" world being present
 	GetWorldProgress("TEST");
 	// so that we can save the word!
 	for(i=0;i<profile.progress.num_worlds;i++)
 	{
-		fwrite(&profile.progress.world[i],76,1,f);
-		fwrite("\0\0\0\0", 4, 1, f);
+		SDL_RWwrite(f, &profile.progress.world[i],76,1);
+		SDL_RWwrite(f, "\0\0\0\0", 4, 1);
 		for(j=0;j<profile.progress.world[i].levels;j++)
 		{
-			fwrite(&profile.progress.world[i].level[j],sizeof(levelData_t),1,f);
+			SDL_RWwrite(f, &profile.progress.world[i].level[j],sizeof(levelData_t),1);
 		}
 	}
-	fclose(f);
+	f.reset();
 	AppdataSync();
 	firstTime=0;
 }
 
-void LoadPlayLists(FILE *f)
+void LoadPlayLists(SDL_RWops *f)
 {
 	int i;
 
 	for(i=0;i<NUM_PLAYLISTS;i++)
 	{
-		fread(&profile.playList[i].numSongs,1,sizeof(byte),f);
+		SDL_RWread(f,&profile.playList[i].numSongs,1,sizeof(byte));
 		if(profile.playList[i].numSongs>0)
 		{
 			profile.playList[i].song=(char *)malloc(SONGNAME_LEN*profile.playList[i].numSongs);
-			fread(profile.playList[i].song,SONGNAME_LEN,profile.playList[i].numSongs,f);
+			SDL_RWread(f,profile.playList[i].song,SONGNAME_LEN,profile.playList[i].numSongs);
 			static_assert(SONGNAME_LEN == 128, "save compatibility broken; adjust this assertion if you are sure");
 		}
 		else
@@ -144,44 +160,43 @@ void LoadPlayLists(FILE *f)
 
 void LoadProfile(const char *name)
 {
-	FILE *f;
 	int i,j;
 
 	strcpy(profile.name,name);
 	sprintf(prfName,"profiles/%s.prf",profile.name);
 
 	// save this profile as the current one.
-	f=AppdataOpen_Write("profile.cfg");
-	fprintf(f,"%s\n",profile.name);
-	fclose(f);
+	auto f = AppdataOpen_Write("profile.cfg");
+	SDL_RWprintf(f.get(), "%s\n", profile.name);
+	f.reset();
 	AppdataSync();
 
 	// now load it
-	f=AppdataOpen(prfName);
+	f = AppdataOpen(prfName);
 	if(!f)	// file doesn't exist
 	{
 		DefaultProfile(name);
 		return;
 	}
 	// begin fread(&profile, sizeof(profile_t), 1, f) emulation
-	fread(&profile, 68, 1, f);
-	fseek(f, NUM_PLAYLISTS * 8, SEEK_CUR);
+	SDL_RWread(f, &profile, 68, 1);
+	SDL_RWseek(f, NUM_PLAYLISTS * 8, RW_SEEK_CUR);
 	static_assert(NUM_PLAYLISTS == 4, "save compatibility broken; adjust this assertion if you are sure");
-	fread(&profile.difficulty, 8, 1, f);
+	SDL_RWread(f, &profile.difficulty, 8, 1);
 	// begin progress_t part
 	{
-		fread(&profile.progress, 112, 1, f);
+		SDL_RWread(f, &profile.progress, 112, 1);
 		static_assert(offsetof(progress_t, world) == 112, "save compatibility broken; adjust this assertion if you are sure");
-		fseek(f, 4, SEEK_CUR);  // skip worldData_t *world
-		fread(&profile.progress.kills, 2152 - 112 - 4, 1, f);
+		SDL_RWseek(f, 4, RW_SEEK_CUR);  // skip worldData_t *world
+		SDL_RWread(f, &profile.progress.kills, 2152 - 112 - 4, 1);
 		//static_assert(sizeof(progress_t) == 2152 + sizeof(worldData_t*), "save compatibility broken; adjust this assertion if you are sure");
 		static_assert(NUM_PROFILE_MONSTERS == 211, "save compatibility broken; adjust this assertion if you are sure");
 	}
 	// end progress_t part
-	fread(&profile.motd, sizeof(profile.motd), 1, f);
-	SDL_assert(ftell(f) == 3284);
+	SDL_RWread(f, &profile.motd, sizeof(profile.motd), 1);
+	SDL_assert(SDL_RWtell(f) == 3284);
 	// end fread emulation
-	LoadPlayLists(f);
+	LoadPlayLists(f.get());
 
 	if(profile.progress.num_worlds==0)
 		profile.progress.world=NULL;
@@ -190,16 +205,26 @@ void LoadProfile(const char *name)
 		profile.progress.world=(worldData_t *)malloc(sizeof(worldData_t)*profile.progress.num_worlds);
 		for(i=0;i<profile.progress.num_worlds;i++)
 		{
-			fread(&profile.progress.world[i],76,1,f);
-			fseek(f, 4, SEEK_CUR);
+			SDL_RWread(f, &profile.progress.world[i],76,1);
+			SDL_RWseek(f, 4, RW_SEEK_CUR);
 			profile.progress.world[i].level=(levelData_t *)malloc(sizeof(levelData_t)*profile.progress.world[i].levels);
 			for(j=0;j<profile.progress.world[i].levels;j++)
 			{
-				fread(&profile.progress.world[i].level[j],sizeof(levelData_t),1,f);
+				SDL_RWread(f, &profile.progress.world[i].level[j],sizeof(levelData_t),1);
 			}
 		}
 	}
-	fclose(f);
+	f.reset();
+
+	if (profile.progress.moreJoyCtrl[0] == 0)
+	{
+		profile.progress.moreControl[0][0]=SDL_SCANCODE_TAB;  // wpnlock
+		profile.progress.moreControl[0][1]=0;  // reserved
+		profile.progress.moreControl[1][0]=0;  // wpnlock
+		profile.progress.moreControl[1][1]=0;  // reserved
+		profile.progress.moreJoyCtrl[0]=2;
+		profile.progress.moreJoyCtrl[1]=3;
+	}
 
 	SteamManager::Get()->ProfileReady();
 }
@@ -267,7 +292,7 @@ void ClearProgress(void)
 	for(i=0;i<100;i++)
 		profile.progress.goal[i]=0;
 
-	memset(profile.progress.expansion,0,EXPANSION_SIZE);	// clear the expansion bytes
+	memset(profile.progress.expansion, 0, std::size(profile.progress.expansion));	// clear the expansion bytes
 
 	profile.progress.damageDone=0;
 	profile.progress.damageTaken=0;
@@ -309,8 +334,15 @@ void DefaultControls(void)
 	profile.control[1][4]=SDL_SCANCODE_Z;
 	profile.control[1][5]=SDL_SCANCODE_X;
 
+	profile.progress.moreControl[0][0]=SDL_SCANCODE_TAB;  // wpnlock
+	profile.progress.moreControl[0][1]=0;  // reserved
+	profile.progress.moreControl[1][0]=0;  // wpnlock
+	profile.progress.moreControl[1][1]=0;  // reserved
+
 	profile.joyCtrl[0]=0;
 	profile.joyCtrl[1]=1;
+	profile.progress.moreJoyCtrl[0]=2;
+	profile.progress.moreJoyCtrl[1]=3;
 }
 
 void DefaultProfile(const char *name)
@@ -571,7 +603,7 @@ static const char diffName[][16] = {
 	"Hard",
 	"Lunatic",
 };
-static_assert(SDL_arraysize(diffName) == MAX_DIFFICULTY, "Must give new difficulties a name");
+static_assert(std::size(diffName) == MAX_DIFFICULTY, "Must give new difficulties a name");
 
 const char* GetDifficultyName(int difficulty)
 {

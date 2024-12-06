@@ -255,7 +255,7 @@ static const badge_t badge[NUM_BADGES]={
 	 "",
 	 "",
 	 "",
-	 RULE_NEWGAME},
+	 0},
 	{"Winnin'",
 	 "Earned for winning Adventure Mode.",
 	 "",
@@ -529,7 +529,7 @@ static const badge_t badge[NUM_BADGES]={
 	 "Ultra Weapons Are Go!",
 	 "Replaces the Level III version of each",
 	 "Special Weapon with a super duper version,",
-	 "that costs more coins to fire.  These are",
+	 "that costs more gems to fire.  These are",
 	 "really overpowered!",
 	 "Only useful to characters that use Special",
 	 "Weapons.",
@@ -620,7 +620,7 @@ void BadgeCheatKey(char c)
 
 	if(!strcmp("gimme",&badgeKeys[16-strlen("gimme")]))
 	{
-		opt.meritBadge[cursor]=1-opt.meritBadge[cursor];
+		opt.meritBadge[cursor] = opt.meritBadge[cursor] ? MERIT_NO : MERIT_CHEATED;
 		if(opt.cheats[badge[cursor].cheatNum])
 			opt.cheats[badge[cursor].cheatNum]=0;
 
@@ -639,6 +639,8 @@ void BadgeCheatKey(char c)
 				opt.modes[MODE_LOONYBALL]=1;
 			if(b>=20)
 				opt.modes[MODE_BOWLING]=1;
+			if(b>=25)
+				opt.remixMode=1;
 			if(b>0)
 				opt.modes[MODE_BADGES]=1;
 		}
@@ -657,6 +659,8 @@ void BadgeCheatKey(char c)
 				opt.modes[MODE_LOONYBALL]=0;
 			if(b<20)
 				opt.modes[MODE_BOWLING]=0;
+			if(b<25)
+				opt.remixMode=0;
 			if(b==0)
 				opt.modes[MODE_BADGES]=0;
 		}
@@ -669,13 +673,14 @@ void BadgeCheatKey(char c)
 	{
 		for(i=0;i<NUM_BADGES;i++)
 		{
-			opt.meritBadge[i]=0;
+			opt.meritBadge[i] = MERIT_NO;
 			opt.cheats[i]=0;
 		}
 		for(i=0;i<10;i++)
 			opt.bossDead[i]=0;
 		for(i=0;i<5;i++)
 			opt.modes[i]=0;
+		opt.remixMode=0;
 
 		MakeSuperLoony();
 		SaveOptions();
@@ -685,10 +690,12 @@ void BadgeCheatKey(char c)
 	{
 		for(i=0;i<NUM_BADGES;i++)
 		{
-			opt.meritBadge[i]=1;
+			if (!opt.meritBadge[i])
+				opt.meritBadge[i] = MERIT_CHEATED;
 		}
 		for(i=0;i<5;i++)
 			opt.modes[i]=1;
+		opt.remixMode=1;
 
 		MakeSuperLoony();
 		SaveOptions();
@@ -892,8 +899,9 @@ void RenderBadgeMenu(MGLDraw *mgl)
 	{
 		Print(275,440,"Press Fire to toggle cheat On/Off",0,1);
 		Print(274,440,"Press Fire to toggle cheat On/Off",0,1);
-		Print(275,460,"Press ESC to exit",0,1);
-		Print(274,460,"Press ESC to exit",0,1);
+		const char* toExit = ShowGamepadText() ? "Press Weapon to exit" : "Press ESC to exit";
+		Print(275,460,toExit,0,1);
+		Print(274,460,toExit,0,1);
 	}
 	else
 	{
@@ -928,29 +936,28 @@ TASK(void) BadgeMenu(MGLDraw *mgl)
 
 static TASK(void) EarnBadgeTask(byte b)
 {
-	int i,c;
+	// Steam has its own handling of already-completed goals.
+	Steam()->CompleteGoal(b);
 
-	c=0;
-	for(i=0;i<NUM_BADGES;i++)
-		if(opt.meritBadge[i])
-			c++;
+	bool newlyEarned = !opt.meritBadge[b];
+	// Mark as earned legit even if already cheated.
+	opt.meritBadge[b] = MERIT_EARNED;
 
-	if(c>=25 && opt.remixMode==0)
+	// If newly earned, congratulate the player. No early return so the mode
+	// logic below always runs & can thus be freely tweaked.
+	if (newlyEarned)
 	{
-		opt.remixMode=1;
-		AWAIT ShowGameMode(4,25);
-		SaveOptions();
+		MakeNormalSound(SND_BADGEGET);
+		AWAIT ShowBadge(b);
 	}
 
-	if(opt.meritBadge[b])
-		CO_RETURN;
+	// Unlock things based on the number of badges earned.
+	int c = 0;
+	for (int i = 0; i < NUM_BADGES; i++)
+		if (opt.meritBadge[i])
+			c++;
 
-	opt.modes[MODE_BADGES]=1;	// this just indicates that badge listings should be available
-
-	MakeNormalSound(SND_BADGEGET);
-	opt.meritBadge[b]=1;
-	Steam()->CompleteGoal(b);
-	AWAIT ShowBadge(b);
+	opt.modes[MODE_BADGES] = 1; // this just indicates that badge listings should be available
 
 	if(c>=5 && opt.modes[MODE_SURVIVAL]==0)
 	{
@@ -972,9 +979,14 @@ static TASK(void) EarnBadgeTask(byte b)
 		opt.modes[MODE_BOWLING]=1;
 		AWAIT ShowGameMode(3,20);
 	}
+	if(c>=25 && opt.remixMode==0)
+	{
+		opt.remixMode=1;
+		AWAIT ShowGameMode(4,25);
+	}
 
 	SaveOptions();
-	if(c==40)
+	if(newlyEarned && c==40)
 	{
 		LoopingSound(SND_ENDSONG);
 		AWAIT CheatText(GetDisplayMGL(),1);
@@ -1048,7 +1060,7 @@ byte UpdateGameMode(MGLDraw *mgl,int *lastTime)
 
 TASK(void) ShowGameMode(byte mode,byte numBadges)
 {
-	/*byte done=0;
+	byte done=0;
 	MGLDraw *mgl=GetDisplayMGL();
 	int lastTime;
 	dword hangon;
@@ -1076,7 +1088,7 @@ TASK(void) ShowGameMode(byte mode,byte numBadges)
 
 	}
 	ExitFireworks();
-	ResetClock(hangon);*/
+	ResetClock(hangon);
 }
 
 TASK(void) ShowBadge(byte b)

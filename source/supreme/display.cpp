@@ -1,5 +1,6 @@
 #include "winpch.h"
 #include "display.h"
+#include <algorithm>
 #include "particle.h"
 #include "jamulfmv.h"
 #include "game.h"
@@ -9,6 +10,7 @@
 #include "config.h"
 #include "message.h"
 #include "appdata.h"
+#include "ioext.h"
 
 mfont_t  *gameFont[3]={NULL,NULL,NULL};
 MGLDraw  *mgl=NULL;
@@ -84,13 +86,14 @@ void ExitDisplay(void)
 
 void LoadText(const char *nm,byte mode)
 {
-	FILE *f;
 	char line[256];
 	int y;
 
-	f=AssetOpen(nm);
+	auto f = AppdataOpen(nm);
 	if(!f)
 		return;
+
+	SdlRwStream stream(f.get());
 
 	switch(mode)
 	{
@@ -103,7 +106,7 @@ void LoadText(const char *nm,byte mode)
 			}
 			y=10;
 
-			while(fgets(line,256,f) && y<480-50)
+			while(stream.getline(line, std::size(line)) && y<480-50)
 			{
 				CenterPrint(320,y,VariableMsg(line),0,0);
 				y+=50;
@@ -112,7 +115,7 @@ void LoadText(const char *nm,byte mode)
 		case TEXTFILE_YERFDOG:
 			GetDisplayMGL()->LoadBMP("graphics/yerfmsg.bmp");
 			y=26;
-			while(fgets(line,256,f) && y<270-18)
+			while(stream.getline(line, std::size(line)) && y<270-18)
 			{
 				PrintUnGlow(27,y,VariableMsg(line),2);
 				y+=18;
@@ -121,15 +124,13 @@ void LoadText(const char *nm,byte mode)
 		case TEXTFILE_COMPUTER:
 			GetDisplayMGL()->LoadBMP("graphics/profmenu.bmp");
 			y=10;
-			while(fgets(line,256,f) && y<480-30)
+			while(stream.getline(line, std::size(line)) && y<480-30)
 			{
 				PrintGlow(20,y,VariableMsg(line),0,2);
 				y+=18;
 			}
 			break;
 	}
-
-	fclose(f);
 }
 
 TASK(void) ShowImageOrFlic(const char *str,byte nosnd,byte mode)
@@ -399,12 +400,7 @@ void RenderItAll(world_t *world,Map *map,byte flags)
 		scrx+=-2+Random(5);
 		scry+=-2+Random(5);
 	}
-	if(editing==1)
-	{
-		map->RenderEdit(world,scrx,scry,flags);
-	}
-	else
-		map->Render(world,scrx,scry,flags);
+	map->Render(world,scrx,scry,flags);
 
 	scrx -= mgl->GetWidth() / 2;
 	scry -= mgl->GetHeight() / 2;
@@ -473,15 +469,9 @@ DisplayList::~DisplayList(void)
 
 int DisplayList::GetOpenSlot(void)
 {
-	int i;
-
-	for(i=0;i<MAX_DISPLAY_OBJS;i++)
-	{
-		if(dispObj[i].flags==0)
-			return i;
-	}
-
-	return -1;
+	if (nextfree >= MAX_DISPLAY_OBJS)
+		return -1;
+	return nextfree++;
 }
 
 void DisplayList::HookIn(int me)
@@ -538,16 +528,41 @@ void DisplayList::HookIn(int me)
 
 bool DisplayList::DrawSprite(int x,int y,int z,int z2,word hue,char bright,const sprite_t *spr,word flags)
 {
-	int i;
-
-	if (
-		(x-scrx+mgl->GetWidth()/2) < -DISPLAY_XBORDER ||
-		(x-scrx+mgl->GetWidth()/2) > mgl->GetWidth()+DISPLAY_XBORDER ||
-		(y-scry+mgl->GetHeight()/2) < -DISPLAY_YBORDER ||
-		(y-scry+mgl->GetHeight()/2) > mgl->GetHeight()+DISPLAY_YBORDER
-	)
+	SDL_Rect rect;
+	if (!spr || spr==(sprite_t*)1 || (flags&(DISPLAY_WALLTILE|DISPLAY_ROOFTILE)))
+	{
+		// Use generic boundaries: center point +/- this
+		rect.x = x - DISPLAY_XBORDER;
+		rect.y = y - DISPLAY_YBORDER;
+		rect.w = DISPLAY_XBORDER * 2;
+		rect.h = DISPLAY_YBORDER * 2;
+	}
+	else if (flags & DISPLAY_SHADOW)
+	{
+		// Use precise shadow sprite boundaries.
+		rect.x = x - spr->ofsx - spr->height/2;
+		rect.y = y - spr->ofsy/2 - std::clamp(z, -DISPLAY_YBORDER, DISPLAY_YBORDER);
+		rect.w = spr->height/2 + spr->width;
+		rect.h = spr->height/2;
+	}
+	else
+	{
+		// Use precise sprite boundaries.
+		rect.x = x - spr->ofsx;
+		rect.y = y - spr->ofsy - std::clamp(z, -DISPLAY_YBORDER, DISPLAY_YBORDER);
+		rect.w = spr->width;
+		rect.h = spr->height;
+	}
+	// If the rect is totally offscreen, don't add it to the display list.
+	SDL_Rect screenRect = { scrx - mgl->GetWidth()/2, scry - mgl->GetHeight()/2, mgl->GetWidth(), mgl->GetHeight() };
+	SDL_Rect intersection;
+	if (!SDL_IntersectRect(&rect, &screenRect, &intersection))
+	{
 		return true;
-	i=GetOpenSlot();
+	}
+
+	// Actually insert.
+	int i=GetOpenSlot();
 	if(i==-1)
 		return false;
 

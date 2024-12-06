@@ -1,4 +1,13 @@
 #include "randomizer.h"
+#include <sys/stat.h>
+#include <set>
+#include <vector>
+#include <filesystem>
+#include <algorithm>
+#include <iostream>
+#include <random>
+#include <fstream>
+#include <string>
 #include "mgldraw.h"
 #include "control.h"
 #include "display.h"
@@ -6,34 +15,61 @@
 #include "title.h"
 #include "plasma.h"
 #include "appdata.h"
-#include <filesystem>
-//#include <bits/stdc++.h>
 #include "map.h"
-#include <set>
-#include <vector>
 #include "quest.h"
-#include <iostream>
-#include <random>
-#include <fstream>
 #include "ioext.h"
-#include <charconv>
-#include <string>
-#include "uniform_int_dist.h"
-#include <sys/stat.h>
 #include "options.h"
+
+struct RandoLocation
+{
+	/* data */
+	//int randId;
+	bool isQuest;
+	std::string mapName;
+	int mapId, xcoord, ycoord;
+	int s1, s2;
+	std::string description;
+	std::function<bool(std::set<int> inv)> requirements;
+	RandoItem item;
+	//item newItem;
+};
+
+void RandomizeSeed();
+void PlaceItems(std::vector<RandoLocation>& loc);
+int RandomFill(std::vector<RandoLocation>& locs);
+bool CheckBeatable(std::vector<RandoLocation>& locs);
+
+bool HaveBombs(const std::set<int>& inv);
+bool HaveLightSource(const std::set<int>& inv);
+bool HaveAnyBigGem(const std::set<int>& inv);
+bool HaveAllOrbs(const std::set<int>& inv);
+bool HaveAllBats(const std::set<int>& inv);
+bool HaveAllVamps(const std::set<int>& inv);
+bool HaveSpecialWeaponDamage(const std::set<int>& inv);
+bool HaveSpecialWeaponBullet(const std::set<int>& inv);
+bool HaveSpecialWeaponRangeDamage(const std::set<int>& inv);
+bool HaveSpecialWeaponThroughWalls(const std::set<int>& inv);
+bool HaveAllMushrooms(const std::set<int>& inv);
+bool CanEnterLoonyton(const std::set<int>& inv);
+bool CanCleanseCrypts(const std::set<int>& inv);
+bool CanEnterRockyCliffs(const std::set<int>& inv);
+bool CanEnterVampy(const std::set<int>& inv);
+bool CanEnterVampyII(const std::set<int>& inv);
+bool CanEnterVampyIII(const std::set<int>& inv);
+bool CanEnterVampyIV(const std::set<int>& inv);
 
 static byte cursor;
 static byte oldc;
 static dword oldBtn;
 static byte optMode;
 static std::string seed = "";
-std::set<int> ownedItems;
+static std::set<int> ownedItems;
 static int genTries = 0;
-bool allItems = true;
-bool generated = false;
+static bool allItems = true;
+static bool generated = false;
 
 //auto rng = std::default_random_engine(std::random_device{}());
-auto rng = std::minstd_rand0(std::random_device{}());
+static auto rng = std::minstd_rand0(std::random_device{}());
 
 #define CURSOR_RANDOSEED	0
 #define CURSOR_SEEDENTRY	1
@@ -41,14 +77,15 @@ auto rng = std::minstd_rand0(std::random_device{}());
 #define CURSOR_PLAY			3
 #define CURSOR_EXIT			4
 #define CURSOR_DIFFICULTY	5
+// NOTE: no character chooser because it can affect your generation
 #define CURSOR_COMPLETION	6
-
 
 #define CURSOR_START	0
 #define CURSOR_END		6
 
+constexpr int R_NUM_LOCATIONS = 105;
 
-location basic_locations[R_NUM_LOCATIONS] = {
+static const RandoLocation basic_locations[] = {
 	{false, "Halloween Hill", 0, 194, 5, 24, 25, "Swamp Mud Path", [](const std::set<int>& inv) { return inv.count(VAR_BOOTS); }},
 	{false, "Halloween Hill",  0, 187, 112, 11, 12, "Bog Beast Home", [](const std::set<int>& inv) { return true; }},
 	{false, "Halloween Hill",  0, 2, 46, 69, 70, "Rocky Cliffs below Upper Caverns", [](const std::set<int>& inv) { return CanEnterRockyCliffs(inv); }},
@@ -140,7 +177,7 @@ location basic_locations[R_NUM_LOCATIONS] = {
 	{false, "Castle Vampy Roof", 40, 13, 18, 3, 4, "Toasty the Elder", [](const std::set<int>& inv) { return CanEnterVampy(inv) && HaveAllBats(inv); }},
 	{false, "Heart of Terror", 42, 16, 28, 3, 4, "Bonkula", [](const std::set<int>& inv) { return CanEnterVampyIV(inv) && HaveAllVamps(inv); }},
 	{false, "A Hidey Hole", 43, 5, 22, 1, 2, "Bat Door", [](const std::set<int>& inv) { return inv.count(VAR_BATKEY); }},
-	{false, "A Hidey Hole", 43, 18, 22, 4, 5, "Pebbles", [](const std::set<int>& inv) { return HaveSpecialWeaponThroughWalls(inv); }},
+	{false, "A Hidey Hole", 43, 18, 22, 4, 5, "Pebbles", [](const std::set<int>& inv) { return true; }},
 	{false, "Swampdog Lair", 45, 55, 49, 0, 1, "Entrance", [](const std::set<int>& inv) { return inv.count(VAR_BOOTS); }},
 	{false, "Swampdog Lair", 45, 55, 36, 5, 6, "End", [](const std::set<int>& inv) { return HaveLightSource(inv) && inv.count(VAR_FERTILIZER); }},
 	{true, "Ghostbusting", 0, 0, 0, 0, 0, "Ghostbusting", [](const std::set<int>& inv) { return HaveAnyBigGem(inv) && inv.count(VAR_DAISY) && HaveAllMushrooms(inv); }},
@@ -153,10 +190,11 @@ location basic_locations[R_NUM_LOCATIONS] = {
 	{true, "The Rescue", 7, 0, 0, 0, 0, "The Rescue", [](const std::set<int>& inv) { return HaveLightSource(inv) && CanEnterRockyCliffs(inv); }},
 	{true, "Tree Trimming", 8, 0, 0, 0, 0, "Tree Trimming", [](const std::set<int>& inv) { return true; }},
 	{true, "Witch Mushrooms", 9, 0, 0, 0, 0, "Witch Mushrooms", [](const std::set<int>& inv) { return HaveAllMushrooms(inv); }},
-	{true, "Zombie Stomp", 10, 0, 0, 0, 0, "Zombie Stomp", [](const std::set<int>& inv) { return CanCleanseCrypts(inv); }} };
+	{true, "Zombie Stomp", 10, 0, 0, 0, 0, "Zombie Stomp", [](const std::set<int>& inv) { return CanCleanseCrypts(inv); }},
+};
+static_assert(std::size(basic_locations) == R_NUM_LOCATIONS);
 
-
-rItem itemList[R_NUM_LOCATIONS] = {
+static const RandoItem itemList[] = {
 	{ITM_SUPERHEART, VAR_HEART + 0, "Heart"},
 	{ITM_SUPERHEART, VAR_HEART + 1, "Heart"},
 	{ITM_SUPERHEART, VAR_HEART + 2, "Heart"},
@@ -263,21 +301,7 @@ rItem itemList[R_NUM_LOCATIONS] = {
 	{ITM_REFLECTGEM, VAR_REFLECT, "Reflect"},
 	{ITM_SILVERSLING, VAR_SILVERSLING, "Silver Sling"},
 };
-
-template<class RandomIt, class URBG>
-void shuffleList(RandomIt first, RandomIt last, URBG&& g)
-{
-	typedef typename std::iterator_traits<RandomIt>::difference_type diff_t;
-	typedef sure::uniform_int_distribution<diff_t> distr_t;
-	typedef typename distr_t::param_type param_t;
-
-	distr_t D;
-	diff_t n = last - first;
-	for (diff_t i = n - 1; i > 0; --i) {
-		using std::swap;
-		swap(first[i], first[D(g, param_t(0, i))]);
-	}
-}
+static_assert(std::size(itemList) == R_NUM_LOCATIONS);
 
 void InitRandomizerMenu(void)
 {
@@ -316,21 +340,53 @@ UpdateRandomizerMenu(int* lastTime, MGLDraw* mgl)
 				CO_RETURN 1;
 			}
 
-			if ((c2 & CONTROL_UP) && (!(oldc & CONTROL_UP)))
+			if (c2 & ~oldc & CONTROL_UP)
 			{
 				cursor--;
 				if (cursor > CURSOR_END)
 					cursor = CURSOR_END;
 				MakeNormalSound(SND_MENUCLICK);
 			}
-			if ((c2 & CONTROL_DN) && (!(oldc & CONTROL_DN)))
+			if (c2 & ~oldc & CONTROL_DN)
 			{
 				cursor++;
 				if (cursor > CURSOR_END)
 					cursor = 0;
 				MakeNormalSound(SND_MENUCLICK);
 			}
-			if ((c2 & (CONTROL_B1 | CONTROL_B2 | CONTROL_B3)) && (!(oldc & (CONTROL_B1 | CONTROL_B2 | CONTROL_B3))))
+			if (c2 & ~oldc & CONTROL_LF)
+			{
+				switch (cursor)
+				{
+					case CURSOR_DIFFICULTY:
+						MakeNormalSound(SND_MENUSELECT);
+						opt.difficulty = PrevDifficulty(opt.difficulty);
+						break;
+					case CURSOR_COMPLETION: //logic toggle
+						MakeNormalSound(SND_MENUSELECT);
+						allItems = !allItems;
+						break;
+					default:
+						break;
+				}
+			}
+			if (c2 & ~oldc & CONTROL_RT)
+			{
+				switch (cursor)
+				{
+					case CURSOR_DIFFICULTY:
+						MakeNormalSound(SND_MENUSELECT);
+						opt.difficulty = NextDifficulty(opt.difficulty);
+						break;
+					case CURSOR_COMPLETION: //logic toggle
+						MakeNormalSound(SND_MENUSELECT);
+						allItems = !allItems;
+						break;
+					default:
+						break;
+				}
+			}
+			if (c2 & ~oldc & (CONTROL_B1 | CONTROL_B2 | CONTROL_B3))
 			{
 				switch (cursor)
 				{
@@ -372,11 +428,7 @@ UpdateRandomizerMenu(int* lastTime, MGLDraw* mgl)
 
 				case CURSOR_DIFFICULTY: //difficulty
 					MakeNormalSound(SND_MENUSELECT);
-					opt.difficulty++;
-					if (opt.difficulty > DIFF_HARD)
-					{
-						opt.difficulty = DIFF_BEGINNER;
-					}
+					opt.difficulty = NextDifficulty(opt.difficulty);
 					break;
 
 				case CURSOR_COMPLETION: //logic toggle
@@ -424,7 +476,7 @@ UpdateRandomizerMenu(int* lastTime, MGLDraw* mgl)
 			c = mgl->LastKeyPressed();
 			c2 = GetControls() | GetArrows();
 
-			std::vector<location> loc;
+			std::vector<RandoLocation> loc;
 			RandomFill(loc);
 			if (CheckBeatable(loc)) {
 				optMode = 0;
@@ -461,7 +513,6 @@ void RenderRandomizerMenu(MGLDraw* mgl)
 	int wid;
 	byte* pos;
 	int i;
-	std::string strTries = std::to_string(genTries);
 
 	wid = mgl->GetWidth();
 	pos = mgl->GetScreen() + 40 * wid;
@@ -488,42 +539,50 @@ void RenderRandomizerMenu(MGLDraw* mgl)
 	{
 		PrintColor(239, 59 + CURSOR_SEEDENTRY * 20, "Seed: ", 0, 0, 0);
 		if (optMode == 1) {
+			seed.push_back('_');
 			PrintColor(299, 59 + CURSOR_SEEDENTRY * 20, seed.c_str(), 0, 0, 0);
+			seed.pop_back();
 		}
 		else {
 			PrintColor(299, 59 + CURSOR_SEEDENTRY * 20, seed.c_str(), 0, -5, 0);
 		}
 	}
 
-	PrintColor(240, 60 + CURSOR_GENERATE * 20, "Generate      tries", 7, -10, 0);
-	PrintColor(330, 60 + CURSOR_GENERATE * 20, strTries.c_str(), 7, -10, 0);
+	char genBuf[64];
+	span<char> remaining = ham_strcpy(genBuf, "Generate");
+	if (genTries)
+	{
+		remaining = ham_sprintf(remaining, ": %d tries", genTries);
+	}
+	PrintColor(240, 60 + CURSOR_GENERATE * 20, genBuf, 7, -10, 0);
 	if (cursor == CURSOR_GENERATE)
 	{
-		PrintColor(239, 59 + CURSOR_GENERATE * 20, "Generate      tries", 0, 0, 0);
-		PrintColor(329, 59 + CURSOR_GENERATE * 20, strTries.c_str(), 7, 0, 0);
+		PrintColor(239, 59 + CURSOR_GENERATE * 20, genBuf, 0, 0, 0);
 	}
 
 	PrintColor(240, 60 + CURSOR_PLAY * 20, "Play!", 7, -10, 0);
 	if (cursor == CURSOR_PLAY)
 	{
 		PrintColor(239, 59 + CURSOR_PLAY * 20, "Play!", 0, 0, 0);
-
 	}
 
-	PrintColor(240, 60 + CURSOR_EXIT * 20, "Exit To Main Menu", 7, -10, 0);
+	PrintColor(240, 60 + CURSOR_EXIT * 20, "Exit to Main Menu", 7, -10, 0);
 	if (cursor == CURSOR_EXIT)
-		PrintColor(239, 59 + CURSOR_EXIT * 20, "Exit To Main Menu", 0, 0, 0);
+		PrintColor(239, 59 + CURSOR_EXIT * 20, "Exit to Main Menu", 0, 0, 0);
 
 
 	//80 instead of 60 to give a line break after exit for logic/difficulty toggles
 
+	char diffyDesc[64];
+	remaining = ham_strcpy(diffyDesc, DifficultyName(opt.difficulty));
+	if (opt.difficulty == DIFF_HARD)
+		remaining = ham_strcpy(remaining, " (recommended)");
 	PrintColor(240, 80 + CURSOR_DIFFICULTY * 20, "Difficulty: ", 7, -10, 0);
-	PrintColor(400, 80 + CURSOR_DIFFICULTY * 20, DifficultyName(opt.difficulty), 7, -10, 0);
-
+	PrintColor(400, 80 + CURSOR_DIFFICULTY * 20, diffyDesc, 7, -10, 0);
 	if (cursor == CURSOR_DIFFICULTY)
 	{
 		PrintColor(239, 79 + CURSOR_DIFFICULTY * 20, "Difficulty: ", 0, 0, 0);
-		PrintColor(400, 79 + CURSOR_DIFFICULTY * 20, DifficultyName(opt.difficulty), 0, 0, 0);
+		PrintColor(400, 79 + CURSOR_DIFFICULTY * 20, diffyDesc, 0, 0, 0);
 	}
 
 	PrintColor(240, 80 + CURSOR_COMPLETION * 20, "Game Completion: ", 7, -10, 0);
@@ -531,7 +590,7 @@ void RenderRandomizerMenu(MGLDraw* mgl)
 		PrintColor(400, 80 + CURSOR_COMPLETION * 20, "100%", 7, -10, 0);
 	}
 	else {
-		PrintColor(400, 80 + CURSOR_COMPLETION * 20, "beatable", 7, -10, 0);
+		PrintColor(400, 80 + CURSOR_COMPLETION * 20, "Beatable", 7, -10, 0);
 	}
 	if (cursor == CURSOR_COMPLETION)
 	{
@@ -540,7 +599,7 @@ void RenderRandomizerMenu(MGLDraw* mgl)
 			PrintColor(399, 79 + CURSOR_COMPLETION * 20, "100%", 0, 0, 0);
 		}
 		else {
-			PrintColor(399, 79 + CURSOR_COMPLETION * 20, "beatable", 0, 0, 0);
+			PrintColor(399, 79 + CURSOR_COMPLETION * 20, "Beatable", 0, 0, 0);
 		}
 	}
 }
@@ -572,57 +631,44 @@ RandomizerMenu(MGLDraw* mgl)
 	ExitRandomizerMenu();
 }
 
-void RandomizeSeed() {
-	static std::string charset = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ1234567890";
-	char c;
+void RandomizeSeed()
+{
+	static const char charset[] = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ1234567890";
 	seed = "";
 	while (seed.length() < MAX_SEED_LENGTH) {
-		c = charset[rand() % charset.size()];
-		seed += c;
+		seed += charset[rand() % std::size(charset)];
 	}
 }
 
-void ClearSeed() {
+void ClearSeed()
+{
 	seed = "";
 	genTries = 0;
 }
 
-
-
-int RandomFill(std::vector<location>& locs)
+int RandomFill(std::vector<RandoLocation>& locs)
 {
-	std::vector<rItem *> remainingItems;
-	//std::vector<location*> remainingLocs;
-
-	for (int i = 0; i<R_NUM_LOCATIONS; i++)
+	std::vector<const RandoItem *> remainingItems;
+	remainingItems.reserve(R_NUM_LOCATIONS);
+	for (int i = 0; i < R_NUM_LOCATIONS; i++)
 	{
 		remainingItems.push_back(&itemList[i]);
 	}
+	std::shuffle(remainingItems.begin(), remainingItems.end(), rng);
 
-
-	for (location l : basic_locations)
-	{
-		locs.push_back(l);
-	}
-
-	shuffleList(remainingItems.begin(), remainingItems.end(), rng);
-
+	locs.assign(std::begin(basic_locations), std::end(basic_locations));
 	for (int i = 0; i < locs.size(); i++)
 	{
 		locs[i].item = *remainingItems[i];
 	}
 
-	remainingItems.clear();
-
 	return 1;
-
-
 }
 
-bool CheckBeatable(std::vector<location>& locs) {
+bool CheckBeatable(std::vector<RandoLocation>& locs) {
 	std::set<int> collectedItems;
 	std::set<int> tempItems;
-	std::vector<location> remainingLocs = locs;
+	std::vector<RandoLocation> remainingLocs = locs;
 	//std::vector<location> visited;
 	bool gotEvilizer = false;
 	bool result = false;
@@ -634,7 +680,7 @@ bool CheckBeatable(std::vector<location>& locs) {
 		foundItems = 0;
 		for (int i = 0; i < remainingLocs.size(); i++)
 		{
-			location l = remainingLocs[i];
+			RandoLocation l = remainingLocs[i];
 			if (l.requirements(collectedItems))
 			{
 				//visited.insert( l.newItem.playerVarId );
@@ -684,25 +730,25 @@ bool CheckBeatable(std::vector<location>& locs) {
 
 }
 
-std::string GetSeed()
+const std::string& GetSeed()
 {
 	return seed;
 }
 
-void PlaceItems(std::vector<location>& locList)
+void PlaceItems(std::vector<RandoLocation>& locList)
 {
 	char buff[4096];
-	std::FILE* baseWorld = AppdataOpen("loony.llw");
+	auto baseWorld = AppdataOpen("loony.llw");
 	sprintf(buff, "randomizer/%s rando.llw", seed.c_str());
-	std::FILE* newWorld = AppdataOpen_Write(buff);
+	auto newWorld = AppdataOpen_Write(buff);
 
-	while (int n = fread(buff, 1, 4096, baseWorld))
+	while (int n = SDL_RWread(baseWorld, buff, 1, 4096))
 	{
-		fwrite(buff, 1, 4096, newWorld);
+		SDL_RWwrite(newWorld, buff, 1, 4096);
 	}
 
- 	fclose(baseWorld);
-	fclose(newWorld);
+	newWorld.reset();
+	baseWorld.reset();
 
 	world_t world;
 	sprintf(buff, "randomizer/%s rando.llw", seed.c_str());
@@ -728,21 +774,23 @@ void PlaceItems(std::vector<location>& locList)
 
 	//questFile.open ("quest.txt");
 	sprintf(buff, "randomizer/%s quest.txt", seed.c_str());
-	std::FILE* f = AppdataOpen_Write(buff);
+	auto f = AppdataOpen_Write(buff);
 
-	if (allItems) {
+	if (allItems)
+	{
 		sprintf(buff, "randomizer/ALLITEMS %s spoiler.txt", seed.c_str());
 	}
-	else {
+	else
+	{
 		sprintf(buff, "randomizer/%s spoiler.txt", seed.c_str());
 	}
 
-	std::FILE* f2 = AppdataOpen_Write(buff);
+	auto f2 = AppdataOpen_Write(buff);
 	{
-		FilePtrStream stream(f);
-		FilePtrStream spoilerFile(f2);
+		SdlRwStream stream(f.get());
+		SdlRwStream spoilerFile(f2.get());
 
-		for (location loc : locList)
+		for (RandoLocation loc : locList)
 		{
 			spoilerFile << loc.mapId << "\t\t" << loc.mapName << "\t\t" << loc.description << "\t\t" << loc.item.playerVarId << "\t\t" << loc.item.itemName << "\n";
 
@@ -762,14 +810,13 @@ void PlaceItems(std::vector<location>& locList)
 			}
 		}
 	}
-	fclose(f2);
-	fclose(f);
+	f2.reset();
+	f.reset();
 
 	sprintf(buff, "randomizer/%s rando.llw", seed.c_str());
 	SaveWorld(&world, buff);
 
 	FreeWorld(&world);
-
 }
 
 bool HaveLightSource(const std::set<int>& inv)

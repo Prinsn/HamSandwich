@@ -31,6 +31,7 @@ namespace
 	byte darkness;
 	int offX;
 	byte oldc;
+	dword oldGamepad;
 	bool noSaving = false;
 	int warpCount = 0;
 }
@@ -104,13 +105,24 @@ void RenderQuests(int x,int y)
 	{
 		if(player.var[VAR_QUESTDONE+i])
 		{
+			// These quests can be completed but not turned in yet.
+			// Print them in white as soon as they're "completed", but
+			// only cross them out once you've acquired their reward.
+			bool turnedIn =
+				i == QUEST_TREES ? player.var[VAR_TREEREWARD] :
+				i == QUEST_CROPS ? player.var[VAR_CROPSREWARD] :
+				i == QUEST_ZOMBIES ? player.var[VAR_ZOMBIEREWARD] :
+				i == QUEST_DAISY ? player.var[VAR_GAVEDAISY] :
+				i == QUEST_WOLF ? player.var[VAR_LARRYREWARD] :
+				true;
+
 			PrintColor(x,y,QuestName(i),0,0,0);
-			DrawFillBox(x,y+15,x+180,y+15,31);
+			if (turnedIn)
+				DrawFillBox(x,y+15,x+180,y+15,31);
 		}
 		else if(player.var[VAR_QUESTASSIGN+i])
 		{
-			if(!player.var[VAR_QUESTDONE+i])
-				PrintColor(x,y,QuestName(i),4,-3,0);
+			PrintColor(x,y,QuestName(i),4,-3,0);
 		}
 		else	// not done or assigned
 			PrintColor(x,y,"???????",0,-32,0);
@@ -330,23 +342,26 @@ void RenderPauseMenu(MGLDraw *mgl)
 		else
 			strcat(s,"Off");
 
+		int y = 295 + (player.monsType == MONS_PLYRSWAMPDOG ? 15 : 0);
 		if(opt.cheats[CH_SAVEANY] && (player.worldNum==WORLD_NORMAL || player.worldNum==WORLD_REMIX || player.worldNum==WORLD_RANDOMIZER) && !(player.cheatsOn & PC_HARDCORE))
 		{
-			PrintColor(10,295,"Cancel",4-4*(cursor==CURSOR_CANCEL),-8+8*(cursor==CURSOR_CANCEL),2);
-			PrintColor(10,330,s,4-4*(cursor==CURSOR_WPNLOCK),-8+8*(cursor==CURSOR_WPNLOCK),2);
-			PrintColor(10,365,"Load Game",4-4*(cursor==CURSOR_LOAD),-8+8*(cursor==CURSOR_LOAD),2);
+			int dy = (435 - y) / 4;
+			PrintColor(10,y,"Cancel",4-4*(cursor==CURSOR_CANCEL),-8+8*(cursor==CURSOR_CANCEL),2);
+			PrintColor(10,y+=dy,s,4-4*(cursor==CURSOR_WPNLOCK),-8+8*(cursor==CURSOR_WPNLOCK),2);
+			PrintColor(10,y+=dy,"Load Game",4-4*(cursor==CURSOR_LOAD),-8+8*(cursor==CURSOR_LOAD),2);
 			if(noSaving)
-				PrintColor(10,400,"Save Game",0,-8+8*(cursor==CURSOR_SAVE),2);
+				PrintColor(10,y+=dy,"Save Game",0,-8+8*(cursor==CURSOR_SAVE),2);
 			else
-				PrintColor(10,400,"Save Game",4-4*(cursor==CURSOR_SAVE),-8+8*(cursor==CURSOR_SAVE),2);
-			PrintColor(10,435,"Quit",4-4*(cursor==CURSOR_QUIT),-8+8*(cursor==CURSOR_QUIT),2);
+				PrintColor(10,y+=dy,"Save Game",4-4*(cursor==CURSOR_SAVE),-8+8*(cursor==CURSOR_SAVE),2);
+			PrintColor(10,y+=dy,"Quit",4-4*(cursor==CURSOR_QUIT),-8+8*(cursor==CURSOR_QUIT),2);
 		}
 		else
 		{
-			PrintColor(10,295,"Cancel",4-4*(cursor==CURSOR_CANCEL),-8+8*(cursor==CURSOR_CANCEL),2);
-			PrintColor(10,342,s,4-4*(cursor==CURSOR_WPNLOCK),-8+8*(cursor==CURSOR_WPNLOCK),2);
-			PrintColor(10,388,"Load Game",4-4*(cursor==CURSOR_LOAD),-8+8*(cursor==CURSOR_LOAD),2);
-			PrintColor(10,435,((player.cheatsOn & PC_HARDCORE) ? "Save & Quit" : "Quit"),4-4*(cursor==CURSOR_QUIT),-8+8*(cursor==CURSOR_QUIT),2);
+			int dy = (435 - y) / 3;
+			PrintColor(10,y,"Cancel",4-4*(cursor==CURSOR_CANCEL),-8+8*(cursor==CURSOR_CANCEL),2);
+			PrintColor(10,y+=dy,s,4-4*(cursor==CURSOR_WPNLOCK),-8+8*(cursor==CURSOR_WPNLOCK),2);
+			PrintColor(10,y+=dy,"Load Game",4-4*(cursor==CURSOR_LOAD),-8+8*(cursor==CURSOR_LOAD),2);
+			PrintColor(10,y+=dy,((player.cheatsOn & PC_HARDCORE) ? "Save & Quit" : "Quit"),4-4*(cursor==CURSOR_QUIT),-8+8*(cursor==CURSOR_QUIT),2);
 		}
 
 		if((player.worldNum==WORLD_NORMAL || player.worldNum==WORLD_REMIX || player.worldNum==WORLD_RANDOMIZER))
@@ -407,7 +422,6 @@ void HandlePauseKeyPresses(MGLDraw *mgl)
 
 void GetSaves(void)
 {
-	FILE *f;
 	int i;
 	char txt[32];
 	player_t p;
@@ -415,15 +429,15 @@ void GetSaves(void)
 	for(i=0;i<5;i++)
 	{
 		ham_sprintf(txt,"save%d.sav", saveOffset + i + 1);
-		f=AppdataOpen(txt);
+		auto f = AppdataOpen(txt);
 		if(!f)
 		{
 			saveDesc[i][0] = '\0';
 		}
 		else
 		{
-			fread(&p,sizeof(player_t),1,f);
-			fclose(f);
+			SDL_RWread(f,&p,sizeof(player_t),1);
+			f.reset();
 
 			DescribeSave(saveDesc[i], &p);
 		}
@@ -432,18 +446,17 @@ void GetSaves(void)
 
 void LoadGame(int i)
 {
-	FILE *f;
 	char txt[128];
 
 	ham_sprintf(txt,"save%d.sav",i+1);
-	f=AppdataOpen(txt);
+	auto f = AppdataOpen(txt);
 	if(!f)
 	{
 		InitPlayer(INIT_GAME,0,0);
 	}
 	else
 	{
-		fread(&player,sizeof(player_t),1,f);
+		SDL_RWread(f, &player,sizeof(player_t),1);
 		if(player.worldNum==WORLD_REMIX)
 		{
 			FreeWorld(&curWorld);
@@ -469,11 +482,11 @@ void LoadGame(int i)
 
 			InitWorld(&curWorld,WORLD_RANDOMIZER);
 		}
-		LoadGuys(f);
+		LoadGuys(f.get());
 		if(!curMap)
 			curMap=new Map(20,20,"hi");
-		curMap->LoadFromProgress(f);
-		fclose(f);
+		curMap->LoadFromProgress(f.get());
+		f.reset();
 		player.lastSave=i;
 		ResetInterface();
 		MakeNormalSound(SND_LOADGAME);
@@ -486,6 +499,26 @@ void LoadGame(int i)
 		}
 		if(player.invinc<60)
 			player.invinc=60;	// and make you invincible briefly
+
+		// In the Randomizer update, some checks were changed from "quest completed?"
+		// to "has item?". Most items were already set at the same time as the quest
+		// completion, but these items were new with the Randomizer, so we need to
+		// handle old saves.
+		if (player.worldNum == WORLD_NORMAL || player.worldNum == WORLD_REMIX)
+		{
+			if (player.var[VAR_HEART + 16])
+				player.var[VAR_WITCHREWARD] = 1;
+			if (player.var[VAR_QUESTDONE + QUEST_RESCUE])
+				player.var[VAR_LANTERN] = 1;
+			if (player.var[VAR_HEART + 15])
+				player.var[VAR_TREEREWARD] = 1;
+			if (player.var[VAR_QUESTDONE + QUEST_SILVER])
+				player.var[VAR_SILVERSLING] = 1;
+			if (player.var[VAR_KEY + 2])
+				player.var[VAR_LARRYREWARD] = 1;
+			if (player.var[VAR_FERTILIZER])
+				player.var[VAR_CROPSREWARD] = 1;
+		}
 	}
 	noSaving=0;
 
@@ -495,11 +528,10 @@ void LoadGame(int i)
 
 void SaveGame(int i)
 {
-	FILE *f;
 	char txt[32];
 
 	ham_sprintf(txt,"save%d.sav",i+1);
-	f=AppdataOpen_Write(txt);
+	auto f = AppdataOpen_Write(txt);
 	if(!f)
 	{
 		return;
@@ -511,12 +543,12 @@ void SaveGame(int i)
 		player.desty=goodguy->mapy;
 		if(!(player.cheatsOn&PC_HARDCORE))
 			player.numSaves++;	// saves do not count in hardcore mode
-		fwrite(&player,sizeof(player_t),1,f);
+		SDL_RWwrite(f,&player,sizeof(player_t),1);
 		player.destx=0;
 		player.desty=0;
-		SaveGuys(f);
-		curMap->SaveProgress(f);
-		fclose(f);
+		SaveGuys(f.get());
+		curMap->SaveProgress(f.get());
+		f.reset();
 		AppdataSync();
 		NewBigMessage("Game Saved",30);
 		MakeNormalSound(SND_SAVEGAME);
@@ -560,7 +592,8 @@ void InitPauseMenu(void)
 	cursor=CURSOR_CANCEL;
 	darkness=0;
 	offX=400;
-	oldc=255;
+	oldc = ~0;
+	oldGamepad = ~0;
 	warpCount = 0;
 
 	GetSaves();
@@ -581,11 +614,13 @@ PauseMenuResult UpdatePauseMenu(MGLDraw *mgl)
 
 	byte c = GetControls()|GetArrows();
 	byte tap = c & ~oldc;
+	dword gamepadTap = GetGamepadButtons() & ~oldGamepad;
 
 	reptCounter++;
 	if((!oldc) || (reptCounter>10))
 		reptCounter=0;
 	oldc = c;
+	oldGamepad = GetGamepadButtons();
 
 	if(subMode==SubMode::None)	// not in any submenu
 	{
@@ -716,7 +751,7 @@ PauseMenuResult UpdatePauseMenu(MGLDraw *mgl)
 	}
 
 	HandlePauseKeyPresses(mgl);
-	if(lastKey==27 || (tap & CONTROL_B2))	// hit ESC to exit pause menu
+	if(lastKey==27 || (gamepadTap & ((1 << SDL_CONTROLLER_BUTTON_BACK) | (1 << SDL_CONTROLLER_BUTTON_B)))) // hit ESC to exit pause menu
 	{
 		if (cursor == CURSOR_SAVE)
 		{

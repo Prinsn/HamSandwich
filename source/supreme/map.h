@@ -4,7 +4,6 @@
 #include "tile.h"
 #include "items.h"
 #include "special.h"
-#include "legacyload.h"
 
 constexpr int MAX_LIGHT = 16;
 constexpr int MIN_LIGHT = -32;
@@ -71,15 +70,6 @@ typedef struct mapTile_t
 } mapTile_t;
 
 // SERIALIZED.
-typedef struct saveTile_t
-{
-	word floor;
-	word wall;
-	byte item;
-	char light;
-} saveTile_t;
-
-// SERIALIZED.
 typedef struct mapBadguy_t
 {
 	byte x,y;
@@ -92,19 +82,14 @@ struct world_t;
 class Map
 {
 	public:
-		Map(byte size,const char *name);
-		explicit Map(Map *m);
-		explicit Map(FILE *f);
-		explicit Map(old_map_t *old);
+		explicit Map(byte size, const char *name);
+		explicit Map(byte width, byte height, const char *name);
+		explicit Map(const Map *m);
 
 		~Map(void);
 
-		byte Save(FILE *f);
-		void SaveMapData(FILE *f);
-		void LoadMapData(FILE *f);
 		void Init(world_t *wrld);
 		void Render(world_t *world,int camX,int camY,byte flags);
-		void RenderEdit(world_t *world,int camX,int camY,byte flags);
 		void RenderSelect(world_t *world,int camX,int camY,byte flags);
 
 		byte DropItem(int x,int y,byte itm);

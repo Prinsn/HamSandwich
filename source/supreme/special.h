@@ -159,8 +159,6 @@ void DefaultEffect(effect_t *eff,int x,int y,byte savetext);
 
 int GetSpecial(byte x,byte y);
 special_t *GetSpecial(int i);
-void SaveSpecials(FILE *f);
-void LoadSpecials(FILE *f,special_t *list);
 void DeleteSpecial(int i);
 
 class Map;

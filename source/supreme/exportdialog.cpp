@@ -16,6 +16,8 @@
 #include "guy.h"
 #include "editor.h"
 #include "winpch.h"
+#include "ioext.h"
+#include "string_extras.h"
 
 #ifdef HAS_STEAM_API
 #ifdef _WIN32
@@ -80,8 +82,8 @@ namespace
 
 		void SaveWorkshopDataFile()
 		{
-			owned::FILE f { AssetOpen_Write(workshopDataFilename.c_str()) };
-			fprintf(f.get(), "workshop_item_id=%" PRIu64 "\n", workshopItemId);
+			auto f = AppdataOpen_Write(workshopDataFilename.c_str());
+			SDL_RWprintf(f.get(), "workshop_item_id=%" PRIu64 "\n", workshopItemId);
 		}
 
 		void CreateCallback(CreateItemResult_t* result, bool)
@@ -130,7 +132,7 @@ namespace
 			}
 
 			const char* tags[] = {"World"};
-			SteamParamStringArray_t tagArray = { tags, SDL_arraysize(tags) };
+			SteamParamStringArray_t tagArray = { tags, std::size(tags) };
 			if (!SteamUGC()->SetItemTags(handle, &tagArray))
 			{
 				progress = Progress::Failed;
@@ -200,10 +202,11 @@ namespace
 		void LoadWorkshopDataFile(std::string source)
 		{
 			workshopDataFilename = std::move(source);
-			if (owned::FILE f { AppdataOpen(workshopDataFilename.c_str()) })
+			if (auto f = AppdataOpen(workshopDataFilename.c_str()))
 			{
+				SdlRwStream stream(f.get());
 				char buf[128];
-				while (fgets(buf, SDL_arraysize(buf), f.get()))
+				while (stream.getline(buf, std::size(buf)))
 				{
 					char* eq = strchr(buf, '=');
 					if (eq)
@@ -265,7 +268,7 @@ static void AddDependency(std::string_view part1, std::string_view part2)
 
 	FileKind kind = FileKind::DependencyMissing;
 	vanilla::VfsMeta meta;
-	if (AppdataVfs().query_bottom(fname.c_str(), &meta))
+	if (Vfs()->query_bottom(fname.c_str(), &meta))
 	{
 		switch (meta.kind)
 		{
@@ -293,30 +296,30 @@ static bool BadCharacter(char ch)
 
 static void SaveReqFilesTxt()
 {
-	FILE *f = AppdataOpen_Write("req_files.txt");
-	fprintf(f, "# World: %s\n", title.c_str());
+	auto f = AppdataOpen_Write("req_files.txt");
+	SDL_RWprintf(f.get(), "# World: %s\n", title.c_str());
 	for (const auto& file : files)
 	{
 		switch (file.kind)
 		{
 			case FileKind::Root:
-				fprintf(f, "# Root: %s\n", file.filename.c_str());
+				SDL_RWprintf(f.get(), "# Root: %s\n", file.filename.c_str());
 				break;
 			case FileKind::DependencyMissing:
-				fprintf(f, "%s    # MISSING!\n", file.filename.c_str());
+				SDL_RWprintf(f.get(), "%s    # MISSING!\n", file.filename.c_str());
 				break;
 			case FileKind::DependencyAppdata:
 			case FileKind::DependencyOtherAddon:
-				fprintf(f, "%s\n", file.filename.c_str());
+				SDL_RWprintf(f.get(), "%s\n", file.filename.c_str());
 				break;
 			case FileKind::DependencyBaseGame:
-				fprintf(f, "# Base game: %s\n", file.filename.c_str());
+				SDL_RWprintf(f.get(), "# Base game: %s\n", file.filename.c_str());
 				break;
 			default:
 				break;
 		}
 	}
-	fclose(f);
+	f.reset();
 	AppdataSync();
 	saveTxtResult = "Saved OK!";
 }
@@ -363,7 +366,7 @@ static void SaveZip()
 			if (err != ZIP_OK)
 				break;
 
-			owned::SDL_RWops rw = AssetOpen_SDL_Owned(file.filename.c_str());
+			owned::SDL_RWops rw = AppdataOpen(file.filename.c_str());
 			if (!rw)
 			{
 				err = 10;
@@ -411,7 +414,7 @@ static std::string TempName()
 	std::string base;
 #ifdef _WIN32
 	char buf[MAX_PATH];
-	size_t len = GetTempPathA(SDL_arraysize(buf), buf);
+	size_t len = GetTempPathA(std::size(buf), buf);
 	base.assign(buf, len);
 #else
 	base = "/tmp";
@@ -444,7 +447,7 @@ static std::string PrepareWorkshopFolder()
 				return "";
 			}
 
-			owned::SDL_RWops rw = AssetOpen_SDL_Owned(file.filename.c_str());
+			owned::SDL_RWops rw = AppdataOpen(file.filename.c_str());
 			if (!rw)
 			{
 				LogError("Workshop: Failed to open for reading: %s", file.filename.c_str());

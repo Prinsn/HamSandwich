@@ -9,11 +9,11 @@
 #include "ioext.h"
 #include "appdata.h"
 #include <vector>
-#include <sstream> 
+#include <sstream>
 
-rItem randoReward[11];
+RandoItem randoReward[11];
 
-char questName[NUM_QUESTS][64]={
+static const char questName[NUM_QUESTS][64]={
 	"Save Halloween Hill",
 	"Tree Trimming",
 	"Scaredy Cat",
@@ -36,7 +36,7 @@ char questName[NUM_QUESTS][64]={
 	"The Collection",
 };
 
-Convo talk[]={
+static Convo talk[]={
 	// 0
 	{"It's a lovely day, eh?",
 	 "",
@@ -738,7 +738,7 @@ Convo talk[]={
 	 "see if I can find the way home THIS time...",
 	 "",
 	 "",
-	 0,0},
+	 24,0},
 	 // 117
 	{"Heidy-ho there! My name is Bonkula, and I'm the king",
 	 "of the vampires! I may not be the biggest vampire,",
@@ -1265,13 +1265,13 @@ Convo talk[]={
 	  33,0},
 };
 
-byte seerTable[]={132,134,0,0,136,138,0,0,140,142,144,146,148,150,152,154,156,158,0,0};
+static const byte seerTable[]={132,134,0,0,136,138,0,0,140,142,144,146,148,150,152,154,156,158,0,0};
 
 byte curChat;
 byte curLine,curChar;
 byte noButtons;
 
-char *QuestName(byte quest)
+const char *QuestName(byte quest)
 {
 	return questName[quest];
 }
@@ -1593,7 +1593,7 @@ void BeginChatting(byte tag)
 			break;
 		case 16:	// Larry after returning to human
 			if(player.var[VAR_QUESTDONE+QUEST_HILL])
-				curChat=172;
+				curChat=170;
 			else
 			{
 				if(player.levelNum!=46)
@@ -2205,16 +2205,16 @@ void GiveRandoItem(int index)
 void LoadRandoItems(){
 	char buff[128];
 	sprintf(buff, "randomizer/%s quest.txt", GetPlayerSeed().c_str());
-	std::FILE* f = AppdataOpen(buff);
+	auto f = AppdataOpen(buff);
 	if (f == NULL)
 	{
 		return;
 	}
-	FilePtrStream stream(f);
+	SdlRwStream stream(f.get());
 	std::string line;
 	std::string value;
-	while (getline(stream, line)){
-
+	while (getline(stream, line))
+	{
 		std::stringstream ss(line);
 
 		getline(ss, value, '\t');
@@ -2227,5 +2227,4 @@ void LoadRandoItems(){
 		randoReward[questID].itemId = itemID;
 		randoReward[questID].playerVarId = varID;
 	}
-
 }

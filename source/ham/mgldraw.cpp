@@ -23,9 +23,7 @@
 #endif  // __EMSCRIPTEN__
 
 // in control.cpp
-void ControlKeyDown(byte scancode);
-void ControlKeyUp(byte scancode);
-void ControlHandleNewGamepad(int which);
+void ControlHandleEvent(const SDL_Event &event);
 
 static const RGB BLACK = {0, 0, 0, 0};
 
@@ -415,10 +413,15 @@ TASK(void) MGLDraw::FinishFlip(void)
 	SDL_Event e;
 	while(SDL_PollEvent(&e))
 	{
-		if (e.type == SDL_KEYDOWN)
+		if (e.type == SDL_KEYDOWN || e.type == SDL_KEYUP)
 		{
 			TranslateKey(&e.key.keysym);
-			ControlKeyDown(e.key.keysym.scancode);
+		}
+
+		ControlHandleEvent(e);
+
+		if (e.type == SDL_KEYDOWN)
+		{
 			lastRawCode = e.key.keysym.scancode;
 			if (!(e.key.keysym.sym & ~0xff))
 			{
@@ -510,11 +513,6 @@ TASK(void) MGLDraw::FinishFlip(void)
 				lastKeyPressed = e.text.text[0];
 			}
 		}
-		else if (e.type == SDL_KEYUP)
-		{
-			TranslateKey(&e.key.keysym);
-			ControlKeyUp(e.key.keysym.scancode);
-		}
 		else if (e.type == SDL_MOUSEMOTION)
 		{
 			if (enableTouchMouse || e.motion.which != SDL_TOUCH_MOUSEID)
@@ -563,10 +561,6 @@ TASK(void) MGLDraw::FinishFlip(void)
 		else if (e.type == SDL_QUIT)
 		{
 			readyToQuit = 1;
-		}
-		else if (e.type == SDL_CONTROLLERDEVICEADDED)
-		{
-			ControlHandleNewGamepad(e.cdevice.which);
 		}
 		else if (e.type == SDL_CONTROLLERDEVICEREMOVED)
 		{
@@ -1111,7 +1105,7 @@ bool MGLDraw::LoadBMP(const char *name)
 
 bool MGLDraw::LoadBMP(const char *name, PALETTE pal)
 {
-	owned::SDL_RWops rw = AssetOpen_SDL_Owned(name);
+	owned::SDL_RWops rw = AppdataOpen(name);
 	if (!rw) {
 		// Asset stack printed error already
 		return false;
@@ -1196,7 +1190,7 @@ bool MGLDraw::SaveBMP(const char *name)
 	{
 		surface->format->palette->colors[i] = { thePal[i].r, thePal[i].g, thePal[i].b, thePal[i].a };
 	}
-	SDL_SaveBMP_RW(surface, AppdataOpen_Write_SDL(name).release(), SDL_TRUE);
+	SDL_SaveBMP_RW(surface, AppdataOpen_Write(name).release(), SDL_TRUE);
 	SDL_FreeSurface(surface);
 	return true;
 }
@@ -1286,7 +1280,7 @@ void MGLDraw::StopTextInput()
 
 void FatalError(const char *msg)
 {
-	fprintf(stderr, "FATAL: %s\n", msg);
+	LogError("FATAL: %s", msg);
 	SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, "Fatal Error", msg, nullptr);
 	if (_globalMGLDraw)
 		_globalMGLDraw->Quit();

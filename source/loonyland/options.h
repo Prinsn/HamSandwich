@@ -18,8 +18,8 @@ enum : byte
 	NUM_DIFFICULTY
 };
 const char* DifficultyName(byte difficulty);
-
-#define DIFF_HARD		5
+byte PrevDifficulty(byte difficulty);
+byte NextDifficulty(byte difficulty);
 
 // special cheats
 #define CH_LIGHT	0		// always see everything
@@ -86,20 +86,32 @@ enum PlayerCharacterType : int
 };
 const char* PlayerCharacterName(PlayerCharacterType character);
 
+enum MeritBadgeState : byte
+{
+	MERIT_NO = 0,
+	MERIT_EARNED = 1,
+	// The cheats set this and Steam checks it so you can still play with
+	// everything for fun, but have to actually earn the Steam achievement.
+	MERIT_CHEATED = 2,
+};
+
 typedef struct options_t
 {
 	byte control[2][6];	// key scancodes
 	byte joyCtrl[2];	// joystick 'codes' for the buttons
 	byte sound,music;
 	byte cheats[40];	// which special cheats are on
-	byte meritBadge[40];
+	MeritBadgeState meritBadge[40];
 	byte difficulty;
 	byte modes[5];
 	byte helpOn;
 	byte wpnLock;
 	byte bossDead[10];	// have killed each boss
 	byte remixMode;
-	byte expando[8];	// room for expansion
+	byte moreControl[2][2];
+	byte moreJoyCtrl[2];
+	byte version;
+	byte expando[1];	// room for expansion
 
 	// best scores
 	highScore_t score[9][15];	// high scores in different modes

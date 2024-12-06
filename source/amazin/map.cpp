@@ -72,7 +72,7 @@ void MapExit()
 
 void MapLoad(const char *fname)
 {
-	auto f = AssetOpen_SDL_Owned(fname);
+	auto f = AppdataOpen(fname);
 	if (!f)
 	{
 		FatalError("Can't load map!");
@@ -83,7 +83,7 @@ void MapLoad(const char *fname)
 
 void MapSave(const char *fname)
 {
-	auto f = AppdataOpen_Write_SDL(fname);
+	auto f = AppdataOpen_Write(fname);
 	SDL_RWwrite(f, g_Map, 0x10a, 8);
 }
 
@@ -1102,7 +1102,6 @@ void CheatYippee(void)
 
 void ItemRender(ItemType item, byte itemAnim, int x, int y)
 {
-	sprite_t *spr;
 	int sprIdx;
 	int sort;
 
@@ -1233,7 +1232,7 @@ void ItemRender(ItemType item, byte itemAnim, int x, int y)
 			DisplayListAdd(g_ItemsJsp->GetSprite(((int)(unsigned int)itemAnim >> 2) + 17), x, y, 0, y, 0, DisplayEffect::Normal);
 			break;
 		case ItemType::FireTrail:
-			DisplayListAdd(spr, x, y, 0, y + -0x2000, 0, DisplayEffect::Normal);
+			DisplayListAdd(g_ItemsJsp->GetSprite(26 + (itemAnim & 3)), x, y, 0, y + -0x2000, 0, DisplayEffect::Normal);
 			break;
 		case ItemType::IceTrail:
 			if (itemAnim < 0x8a)
@@ -1251,7 +1250,6 @@ void ItemRender(ItemType item, byte itemAnim, int x, int y)
 void MapRender(bool editor)
 {
 	byte wallBase;
-	sprite_t *spr;
 	int ty;
 	int tx;
 	int y;

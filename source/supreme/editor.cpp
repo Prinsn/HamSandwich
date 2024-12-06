@@ -52,8 +52,6 @@ namespace
 
 byte InitEditor(void)
 {
-	int i;
-
 	NewWorld(&world,editmgl);
 	editorMap=world.map[0];
 	curMapNum=0;
@@ -92,11 +90,6 @@ byte InitEditor(void)
 	strcpy(MonsterName(MONS_DPATROLLR),"Death Patrol Horiz.");
 	strcpy(MonsterName(MONS_DPATROLUD),"Death Patrol Vert.");
 
-	for(i=MONS_SUCKER1;i<=MONS_BLOWER4;i++)
-	{
-		MonsterAnim(i,0)[0]=0;
-	}
-
 	ChangeOffColor(MONS_SHARK,2,4);
 	ChangeOffColor(MONS_SNKYSHRK2,2,4);
 
@@ -131,8 +124,6 @@ byte InitEditor(void)
 
 void ExitEditor(void)
 {
-	int i;
-
 	ExitFileDialog();
 	ToolExit();
 
@@ -162,10 +153,6 @@ void ExitEditor(void)
 	strcpy(MonsterName(MONS_DPATROLLR),"Death Patrol");
 	strcpy(MonsterName(MONS_DPATROLUD),"Death Patrol");
 
-	for(i=MONS_SUCKER1;i<=MONS_BLOWER4;i++)
-	{
-		MonsterAnim(i,0)[0]=254;
-	}
 	StopSong();
 	ExitGuys();
 	FreeWorld(&world);
@@ -205,40 +192,28 @@ void Delete(int x,int y)
 void BackupWorld(const char *name)
 {
 	char inName[128],outName[128];
-	FILE *inF,*outF;
 	int bytes;
-	byte *data;
 
 	sprintf(inName,"worlds/%s",name);
 	sprintf(outName,"worlds/backup_save.dlw");
 
-	inF=AssetOpen(inName);
+	auto inF = AppdataOpen(inName);
 	if(!inF)
 		return;	// the source didn't exist, so nothing to back up
-	outF=AssetOpen_Write(outName);
+	auto outF = AppdataOpen_Write(outName);
 	if(!outF)
-	{
-		fclose(inF);
 		return;	// was unable to open the file for writing for some reason
-	}
-	data=(byte *)malloc(sizeof(byte)*1024);
-	if(!data)
+
+	byte data[8 * 1024];
+	while(true)
 	{
-		fclose(inF);
-		fclose(outF);
-		return;	// couldn't allocate that lousy bit of memory!
-	}
-	while(1)
-	{
-		bytes=fread(data,sizeof(byte),1024,inF);
-		if(bytes>0)
-			fwrite(data,sizeof(byte),bytes,outF);
-		if(bytes<1024)
+		bytes = SDL_RWread(inF, data, sizeof(byte), std::size(data));
+		if (bytes <= 0)
 			break;
+		SDL_RWwrite(outF, data, sizeof(byte), bytes);
 	}
-	free(data);
-	fclose(inF);
-	fclose(outF);
+	outF.reset();
+	inF.reset();
 	AppdataSync();
 }
 
@@ -1146,6 +1121,8 @@ static TASK(void) HandleKeyPresses(void)
 
 void SetEditMode(byte m)
 {
+	if (editMode == EDITMODE_ITEM && m == EDITMODE_EDIT)
+		CalculateItemRenderExtents();
 	editMode=m;
 	if(editMode==EDITMODE_EDIT && viewMenu)
 		InitViewDialog();

@@ -13,6 +13,7 @@
 #include "extern.h"
 #include "owned_mixer.h"
 #include "string_extras.h"
+#include "next_soundfile.h"
 
 struct soundList_t
 {
@@ -135,9 +136,30 @@ void JamulSoundUpdate(void)
 	}
 }
 
+static owned::Mix_Chunk LoadSoundFile(SDL_RWops *rw)
+{
+	uint8_t magic[4];
+	if (SDL_RWread(rw, magic, 4, 1) == 1)
+	{
+		SDL_RWseek(rw, -4, RW_SEEK_CUR);
+
+		if (!memcmp(magic, ".snd", 4))
+		{
+			return LoadNextSoundfile(rw);
+		}
+		else
+		{
+			return owned::Mix_LoadWAV_RW(rw);
+		}
+	}
+
+	SDL_SetError("failed to read first 4 bytes");
+	return nullptr;
+}
+
 // pan: -128 (left) to 127 (right)
 // vol: -255 (silent) to 0 (no attenuation)
-bool JamulSoundPlay(int which,long pan,long vol,int playFlags,int priority)
+bool JamulSoundPlay(int which, long pan, long vol, int playFlags, int priority)
 {
 	char s[32];
 	int i,chosen,lowpriority;
@@ -147,7 +169,7 @@ bool JamulSoundPlay(int which,long pan,long vol,int playFlags,int priority)
 
 	JamulSoundUpdate();
 
-	vol=((vol + 255) * sndVolume) / 255;
+	vol = (vol + 255) * ((playFlags & SND_MUSICVOLUME) ? (2 * Mix_VolumeMusic(-1)) : sndVolume) / 255;
 	pan += 128;
 	if (pan < 0)
 		pan = 0;
@@ -171,7 +193,7 @@ bool JamulSoundPlay(int which,long pan,long vol,int playFlags,int priority)
 		{
 			// If not, try to load it from a file instead
 			ham_sprintf(s,"sound/snd%03d.wav",which);
-			rw = AssetOpen_SDL_Owned(s);
+			rw = AppdataOpen(s);
 			if (!rw)
 			{
 				return false;
@@ -179,7 +201,7 @@ bool JamulSoundPlay(int which,long pan,long vol,int playFlags,int priority)
 		}
 
 		// Now try to load it
-		soundList[which].sample = owned::Mix_LoadWAV_RW(std::move(rw));
+		soundList[which].sample = LoadSoundFile(rw.get());
 		if(soundList[which].sample==NULL)
 		{
 			LogError("LoadWAV(%d): %s", which, Mix_GetError());
@@ -314,10 +336,7 @@ void JamulSoundPurge(void)
 
 void GoPlaySound(int num,long pan,long vol,int flags,int priority)
 {
-	if(!soundIsOn)
-		return;
-	JamulSoundPlay(num,pan,vol,flags,priority);
-
+	JamulSoundPlay(num, pan, vol, flags, priority);
 }
 
 void JamulSoundVolume(int v)

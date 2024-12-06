@@ -286,15 +286,15 @@ void RenderItem(int x,int y,byte type,char bright,byte flags);
 void InstaRenderItem(int x,int y,byte type,char bright,MGLDraw *mgl);
 void DrawRedX(int x,int y,byte candle,MGLDraw *mgl);
 item_t *GetItem(int type);
-item_t *GetBaseItem(int type);
+const item_t *GetBaseItem(int type);
 word NumItems(void);
 int NewItem(void);
 void UpdateItems(void);
 byte GetRandomItem(void);
 void SetupRandomItems(void);
 int GetTotalRarity(void);
-void SaveItems(FILE *f);
-void LoadItems(FILE *f);
+void SaveItems(SDL_RWops *f);
+void LoadItems(SDL_RWops *f);
 void DeleteItem(int itm);
 int NumCustomSprites(void);
 int NumItemSprites(void);
@@ -302,7 +302,7 @@ int BrainsGiven(int type);
 int CandlesGiven(int type);
 int FindItemByName(const char *name);
 
-byte AppendItems(FILE *f);
+byte AppendItems(SDL_RWops *f);
 
 struct mapTile_t;
 void UpdateItem(mapTile_t *m,int width,int offset);
@@ -314,8 +314,7 @@ class Map;
 struct world_t;
 
 void MoveMovableItem(int x,int y,Map *map,world_t *world);
-void SetCustomItemSprites(char* filename);
-void DetectCustomItemSprites(world_t *world);
+void SetCustomItemSprites(const char* filename);
 
 byte InteractWithItem(Guy *me,mapTile_t *m,int x,int y);
 byte TriggerItem(Guy *me,mapTile_t *m,int x,int y);
@@ -326,5 +325,12 @@ void RepairItemToItem(int n);	// when item N is deleted, repair references to it
 void RepairItemToSound(int n);	// when sound N is deleted, repair references to it and others in
 								// all items
 void RepairItemToTile(void);	// when tiles are messed with, repair the references in items
+
+struct ItemRenderExtents
+{
+	int left, right, up, down;
+};
+ItemRenderExtents GetItemRenderExtents();
+void CalculateItemRenderExtents();
 
 #endif

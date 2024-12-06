@@ -2,6 +2,7 @@
 #include <string.h>
 #include <algorithm>
 #include <SDL_assert.h>
+#include <SDL_rwops.h>
 
 char* StringDestination::prepare(size_t *len)
 {
@@ -93,4 +94,22 @@ void string_appendf(std::string* buffer, const char* format, ...)
 
 	va_end(args2);
 	va_end(args);
+}
+
+#ifdef __EMSCRIPTEN__
+#define SDL_vasprintf vasprintf
+#endif
+
+size_t SDL_RWprintf(SDL_RWops* rw, const char* format, ...)
+{
+	va_list args;
+	va_start(args, format);
+
+	char* buf = nullptr;
+	size_t size = SDL_vasprintf(&buf, format, args);
+	if (!buf)
+		return size;
+	size = SDL_RWwrite(rw, buf, 1, size);
+	SDL_free(buf);
+	return size;
 }

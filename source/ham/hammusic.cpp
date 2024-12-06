@@ -34,10 +34,7 @@ void UpdateMusic()
 void SetMusicVolume(int vol)
 {
 	musVolume = vol;
-	if (curStream)
-	{
-		Mix_VolumeMusic(musVolume / 2);
-	}
+	Mix_VolumeMusic(musVolume / 2);
 }
 
 void PlaySongFile(const char* fullname)
@@ -47,7 +44,7 @@ void PlaySongFile(const char* fullname)
 
 	StopSong();
 
-	owned::SDL_RWops rw = AssetOpen_SDL_Owned(fullname);
+	owned::SDL_RWops rw = AppdataOpen(fullname);
 	if (!rw)
 	{
 		return;

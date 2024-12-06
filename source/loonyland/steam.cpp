@@ -142,7 +142,7 @@ public:
 		{
 			for (int goal = 0; goal < 40; ++goal)
 			{
-				if (opt.meritBadge[goal])
+				if (opt.meritBadge[goal] == MERIT_EARNED)
 				{
 					CompleteGoal(goal);
 				}
@@ -195,10 +195,10 @@ public:
 
 	void MountWorkshopContent()
 	{
-		vanilla::VfsStack& vfs_stack = AppdataVfs();
+		vanilla::VfsStack* vfs_stack = Vfs();
 
 		// Unmount all existing Workshop content and remount it in the loop below.
-		erase_if(vfs_stack.mounts, [](const vanilla::Mount& mount) { return mount.meta.steamWorkshopId != 0; });
+		erase_if(vfs_stack->mounts, [](const vanilla::Mount& mount) { return mount.meta.steamWorkshopId != 0; });
 
 		uint32_t subscribedCount = SteamUGC()->GetNumSubscribedItems();
 		subscribedItemIds.resize(subscribedCount);
@@ -229,10 +229,10 @@ public:
 			else if ((state & k_EItemStateInstalled) && (state & k_EItemStateSubscribed) && !(state & k_EItemStateDownloadPending))
 			{
 				char dirname[1024];
-				if (SteamUGC()->GetItemInstallInfo(fileId, nullptr, dirname, SDL_arraysize(dirname), nullptr))
+				if (SteamUGC()->GetItemInstallInfo(fileId, nullptr, dirname, std::size(dirname), nullptr))
 				{
 					SDL_LogDebug(SDL_LOG_CATEGORY_APPLICATION, "workshop: %s", dirname);
-					vfs_stack.push_back(vanilla::open_stdio(dirname), "", { vanilla::VfsSourceKind::Addon, fileId });
+					vfs_stack->push_back(vanilla::open_stdio(dirname), "", { vanilla::VfsSourceKind::Addon, fileId });
 				}
 				else
 				{
@@ -262,17 +262,21 @@ public:
 	STEAM_CALLBACK(SteamManagerImpl, on_subscriptions_change, UserSubscribedItemsListChanged_t)
 	{
 		SDL_LogDebug(SDL_LOG_CATEGORY_APPLICATION, "subscriptions changed for %u", pParam->m_nAppID);
-		// TODO: check that it's our appid?
-		MountWorkshopContent();
+		if (pParam->m_nAppID == SteamUtils()->GetAppID())
+		{
+			MountWorkshopContent();
+		}
 	}
 
 	STEAM_CALLBACK(SteamManagerImpl, on_item_downloaded, DownloadItemResult_t)
 	{
-		// TODO: check that it's our appid?
 		if (pParam->m_eResult == k_EResultOK)
 		{
 			SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION, "workshop download %llu succeeded", pParam->m_nPublishedFileId);
-			MountWorkshopContent();
+			if (pParam->m_unAppID == SteamUtils()->GetAppID())
+			{
+				MountWorkshopContent();
+			}
 		}
 		else
 		{
@@ -397,6 +401,33 @@ public:
 		}
 
 		LeaderboardUploadJob::Send(buffer, std::make_unique<HighScoreUploadJob>(score));
+	}
+
+	// ------------------------------------------------------------------------
+	// Upload space game scores
+	struct SpaceGameScoreJob : public LeaderboardUploadJob
+	{
+		explicit SpaceGameScoreJob(int score)
+		{
+			this->score = score;
+		}
+	};
+	struct SpaceGameTimeJob : public LeaderboardUploadJob
+	{
+		explicit SpaceGameTimeJob(int timeInFrames)
+		{
+			// Not a speedrun. Higher survival times are better.
+			displayType = k_ELeaderboardDisplayTypeTimeMilliSeconds;  // INT_MAX is about 596:31:23.645
+
+			// score is now total time in frames - convert it to milliseconds for Steam's benefit
+			this->score = timeInFrames * 1000 / 30;
+		}
+	};
+
+	void UploadSpaceGameScore(int score, int time) override
+	{
+		LeaderboardUploadJob::Send("spacegame/score", std::make_unique<SpaceGameScoreJob>(score));
+		LeaderboardUploadJob::Send("spacegame/time", std::make_unique<SpaceGameTimeJob>(time));
 	}
 };
 

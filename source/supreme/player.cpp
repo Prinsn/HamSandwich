@@ -226,7 +226,8 @@ byte PlayerGetWeapon(byte wpn,int x,int y)
 	cx<<=FIXSHIFT;
 	cy<<=FIXSHIFT;
 
-	if(player.weapon && wpn!=player.weapon && profile.progress.wpnLock)
+	bool wpnLock = bool(profile.progress.wpnLock) ^ bool(GetControls() & CONTROL_B3);
+	if(player.weapon && wpn!=player.weapon && wpnLock)
 		return 0;	// can't pick up weapons while armed!
 
 	if((player.weapon==WPN_PWRARMOR || player.weapon==WPN_MINISUB) && (wpn!=player.weapon))
@@ -2018,7 +2019,7 @@ static const char wpnName[][32] = {
 	"Freeze Ray",
 	"Stopwatch",
 };
-static_assert(SDL_arraysize(wpnName) == MAX_WEAPONS, "Must give new weapon a name");
+static_assert(std::size(wpnName) == MAX_WEAPONS, "Must give new weapon a name");
 
 const char* GetWeaponName(byte weapon)
 {

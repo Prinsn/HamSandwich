@@ -6,6 +6,7 @@
 #include "guy.h"
 #include "config.h"
 #include "log.h"
+#include "math_extras.h"
 
 #define NUM_STARS 400
 
@@ -15,58 +16,18 @@ word starX[NUM_STARS],starY[NUM_STARS];
 byte starCol[NUM_STARS];
 static byte dottedLineOfs;
 
-Map::Map(FILE *f)
+static const byte sizes[3] = {20, 64, 128};
+
+Map::Map(byte size, const char *name)
+	: Map(sizes[size], sizes[size], name)
 {
-	byte count;
-
-	fread(&width,1,sizeof(byte),f);
-	fread(&height,1,sizeof(byte),f);
-	fread(name,32,sizeof(char),f);
-	fread(song,32,sizeof(char),f);
-
-	fread(&count,1,sizeof(byte),f);	// num badguys
-	memset(badguy,0,sizeof(mapBadguy_t)*MAX_MAPMONS);
-	for (byte i = 0; i < count; ++i)
-	{
-		byte temp;
-		fread(&badguy[i].x, 1, sizeof(byte), f);
-		fread(&badguy[i].y, 1, sizeof(byte), f);
-		fread(&temp, 1, sizeof(byte), f);
-		badguy[i].type = temp;
-		fread(&badguy[i].item, 1, sizeof(byte), f);
-	}
-
-	LoadSpecials(f,special);
-
-	fread(&flags,1,sizeof(word),f);
-	fread(&numBrains,1,sizeof(word),f);
-	fread(&numCandles,1,sizeof(word),f);
-	fread(&itemDrops,1,sizeof(word),f);
-
-	map=(mapTile_t *)malloc(sizeof(mapTile_t)*width*height);
-
-	LoadMapData(f);
 }
 
-Map::Map(byte size,const char *name)
+Map::Map(byte width, byte height, const char *name)
+	: width(width)
+	, height(height)
 {
 	int i;
-
-	switch(size)
-	{
-		case 0:
-			width=20;
-			height=20;
-			break;
-		case 1:
-			width=64;
-			height=64;
-			break;
-		case 2:
-			width=128;
-			height=128;
-			break;
-	}
 
 	strcpy(this->name,name);
 
@@ -84,7 +45,7 @@ Map::Map(byte size,const char *name)
 	itemDrops=5*FIXAMT;
 }
 
-Map::Map(Map *m)
+Map::Map(const Map *m)
 {
 	width=m->width;
 	height=m->height;
@@ -104,189 +65,6 @@ Map::Map(Map *m)
 Map::~Map(void)
 {
 	free(map);
-}
-
-void Map::SaveMapData(FILE *f)
-{
-	int pos;
-	byte sameLength,diffLength;
-	int runStart,sameStart;
-	saveTile_t *m,*src;
-	char writeRun;
-	saveTile_t *mapCopy;
-
-	mapCopy=new saveTile_t[width*height];
-
-	for(pos=0;pos<width*height;pos++)
-	{
-		mapCopy[pos].floor=map[pos].floor;
-		mapCopy[pos].wall=map[pos].wall;
-		mapCopy[pos].item=map[pos].item;
-		mapCopy[pos].light=map[pos].light;
-	}
-
-	runStart=0;
-	sameStart=0;
-	sameLength=1;
-	diffLength=1;
-	pos=1;
-	src=&mapCopy[0];
-
-	while(pos<width*height)
-	{
-		m=&mapCopy[pos];
-		if(!memcmp(m,src,sizeof(saveTile_t)))	// the tiles are identical
-		{
-			sameLength++;
-			if(sameLength==128)	// max run length is 127
-			{
-				// write out the run, and start a new run with this last one
-				writeRun=-127;
-				fwrite(&writeRun,1,sizeof(char),f);
-				fwrite(src,1,sizeof(saveTile_t),f);
-				sameStart=pos;
-				runStart=pos;
-				sameLength=1;
-				diffLength=1;
-			}
-			else if(sameLength==2 && runStart!=sameStart)	// 2 in a row the same, time to start this as a same run
-			{
-				writeRun=sameStart-runStart;
-				fwrite(&writeRun,1,sizeof(char),f);
-				fwrite(&mapCopy[runStart],writeRun,sizeof(saveTile_t),f);
-				runStart=sameStart;
-				diffLength=1;
-			}
-		}
-		else // this one is different
-		{
-			if(sameLength<2)
-			{
-				// just continuing the non-same run
-				sameLength=1;
-				sameStart=pos;
-				src=m;
-				diffLength++;
-				if(diffLength==128)	// max run length is 127
-				{
-					writeRun=127;
-					fwrite(&writeRun,1,sizeof(char),f);
-					fwrite(&mapCopy[runStart],127,sizeof(saveTile_t),f);
-					diffLength=1;
-					runStart=pos;
-				}
-			}
-			else	// end a same run, then start a diff run
-			{
-				writeRun=-sameLength;
-				fwrite(&writeRun,1,sizeof(char),f);
-				fwrite(src,1,sizeof(saveTile_t),f);
-				sameStart=pos;
-				runStart=pos;
-				sameLength=1;
-				diffLength=1;
-				src=&mapCopy[pos];
-			}
-		}
-
-		pos++;
-	}
-
-	// write out the final leftovers
-	if(sameLength>1)
-	{
-		// final run is same run
-		writeRun=-sameLength;
-		fwrite(&writeRun,1,sizeof(char),f);
-		fwrite(src,1,sizeof(saveTile_t),f);
-	}
-	else
-	{
-		// either it's one lonely unique tile, or a different run, either way...
-		writeRun=diffLength;
-		fwrite(&writeRun,1,sizeof(char),f);
-		fwrite(&mapCopy[runStart],writeRun,sizeof(saveTile_t),f);
-	}
-	delete[] mapCopy;
-}
-
-void Map::LoadMapData(FILE *f)
-{
-	int pos,i;
-	char readRun;
-	saveTile_t *mapCopy;
-
-	mapCopy=new saveTile_t[width*height];
-
-	pos=0;
-	while(pos<width*height)
-	{
-		fread(&readRun,1,sizeof(char),f);
-		if(readRun<0)	// repeat run
-		{
-			readRun=-readRun;
-			fread(&mapCopy[pos],1,sizeof(saveTile_t),f);
-			for(i=1;i<readRun;i++)
-				memcpy(&mapCopy[pos+i],&mapCopy[pos],sizeof(saveTile_t));
-			pos+=readRun;
-		}
-		else	// unique run
-		{
-			fread(&mapCopy[pos],readRun,sizeof(saveTile_t),f);
-			pos+=readRun;
-		}
-	}
-
-	for(pos=0;pos<width*height;pos++)
-	{
-		map[pos].floor=mapCopy[pos].floor;
-		map[pos].wall=mapCopy[pos].wall;
-		map[pos].item=mapCopy[pos].item;
-		map[pos].light=mapCopy[pos].light;
-		map[pos].select=1;
-		map[pos].opaque=0;
-		map[pos].templight=0;
-	}
-	delete[] mapCopy;
-}
-
-byte Map::Save(FILE *f)
-{
-	int i;
-	byte count;
-
-	fwrite(&width,1,sizeof(byte),f);
-	fwrite(&height,1,sizeof(byte),f);
-	fwrite(name,32,sizeof(char),f);
-	fwrite(song,32,sizeof(char),f);
-
-	count=0;
-	for(i=0;i<MAX_MAPMONS;i++)
-		if(badguy[i].type)
-			count=i+1;
-	fwrite(&count,1,sizeof(byte),f);	// num badguys
-	for (byte i = 0; i < count; ++i)
-	{
-		byte temp = badguy[i].type;
-		if (badguy[i].type > 0xff) {
-			LogError("WARNING: in legacy save, can't save monster '%s' with ID %u > 255", MonsterName(badguy[i].type), badguy[i].type);
-			temp = 0;
-		}
-		fwrite(&badguy[i].x, 1, sizeof(byte), f);
-		fwrite(&badguy[i].y, 1, sizeof(byte), f);
-		fwrite(&temp, 1, sizeof(byte), f);
-		fwrite(&badguy[i].item, 1, sizeof(byte), f);
-	}
-	GetSpecialsFromMap(this->special);
-	SaveSpecials(f);
-
-	fwrite(&flags,1,sizeof(word),f);
-	fwrite(&numBrains,1,sizeof(word),f);
-	fwrite(&numCandles,1,sizeof(word),f);
-	fwrite(&itemDrops,1,sizeof(word),f);
-
-	SaveMapData(f);
-	return 1;
 }
 
 void InitStars()
@@ -1081,240 +859,25 @@ void Map::RenderStars(int camX, int camY)
 
 void Map::Render(world_t *world,int camX,int camY,byte flags)
 {
-	int i,j;
-
-	int tileX,tileY;
-	int ofsX,ofsY;
-	int scrX,scrY;
 	mapTile_t *m;
+
 	char lite;
 	char lites[9];
 	byte shdw;
 
-	camX -= GetDisplayMGL()->GetWidth()/2;
-	camY -= GetDisplayMGL()->GetHeight()/2;
+	int scrWidth = GetDisplayMGL()->GetWidth(), scrHeight = GetDisplayMGL()->GetHeight();
+	camX -= scrWidth/2;
+	camY -= scrHeight/2;
 
-	tileX=(camX/TILE_WIDTH)-1;
-	tileY=(camY/TILE_HEIGHT)-1;
-	ofsX=camX%TILE_WIDTH;
-	ofsY=camY%TILE_HEIGHT;
+	auto [minTileX, ofsX] = floor_div(camX, TILE_WIDTH);
+	auto [minTileY, ofsY] = floor_div(camY, TILE_HEIGHT);
 
-	scrX=-ofsX-TILE_WIDTH;
-	for(i=tileX;i<tileX+(GetDisplayMGL()->GetWidth()/TILE_WIDTH+4);i++)
+	int scrX = -ofsX;
+	for (int i = minTileX; i <= (camX + scrWidth) / TILE_WIDTH; ++i)
 	{
-		scrY=-ofsY-TILE_HEIGHT;
-		for(j=tileY;j<tileY+(GetDisplayMGL()->GetHeight()/TILE_HEIGHT+6);j++)
-		{
-			if(i>=0 && i<width && j>=0 && j<height)
-			{
-				m=&map[i+j*width];
-
-				lite=m->templight;
-
-				lites[4]=lite;
-				if(i>0 && j>0)
-					lites[0]=map[i-1+(j-1)*width].templight;
-				else
-				{
-					if(i>0)
-						lites[0]=map[i-1+(j)*width].templight;
-					else if(j>0)
-						lites[0]=map[i+(j-1)*width].templight;
-					else
-						lites[0]=lite;
-				}
-				if(j>0)
-					lites[1]=map[i+(j-1)*width].templight;
-				else
-					lites[1]=lite;
-				if(i<width-1 && j>0)
-					lites[2]=map[i+1+(j-1)*width].templight;
-				else
-				{
-					if(i<width-1)
-						lites[2]=map[i+1+(j)*width].templight;
-					else if(j>0)
-						lites[2]=map[i+(j-1)*width].templight;
-					else
-						lites[2]=lite;
-				}
-				if(i>0)
-					lites[3]=map[i-1+j*width].templight;
-				else
-					lites[3]=lite;
-				if(i<width-1)
-					lites[5]=map[i+1+(j)*width].templight;
-				else
-					lites[5]=lite;
-				if(i>0 && j<height-1)
-					lites[6]=map[i-1+(j+1)*width].templight;
-				else
-				{
-					if(i>0)
-						lites[6]=map[i-1+(j)*width].templight;
-					else if(j<height-1)
-						lites[6]=map[i+(j+1)*width].templight;
-					else
-						lites[6]=lite;
-				}
-				if(j<height-1)
-					lites[7]=map[i+(j+1)*width].templight;
-				else
-					lites[7]=lite;
-				if(i<width-1 && j<height-1)
-					lites[8]=map[i+1+(j+1)*width].templight;
-				else
-				{
-					if(i<width-1)
-						lites[8]=map[i+1+(j)*width].templight;
-					else if(j<height-1)
-						lites[8]=map[i+(j+1)*width].templight;
-					else
-						lites[8]=lite;
-				}
-
-				RenderItem(scrX+camX+(TILE_WIDTH/2),scrY+camY+(TILE_HEIGHT/2)-1,m->item,lite,flags);
-
-				if(m->wall)	// there is a wall on this tile
-				{
-					if(j<height-1)
-					{
-						// if the tile below this one is also a wall, don't waste the
-						// time of drawing the front of this wall
-						if(map[i+(j+1)*width].wall &&
-							(!(GetTerrain(world,map[i+(j+1)*width].floor)->flags&TF_TRANS)))
-						{
-							if(GetTerrain(world,m->floor)->flags&TF_TRANS)
-								RoofDraw(scrX+camX,scrY+camY,m->floor,lites,
-										DISPLAY_DRAWME|DISPLAY_ROOFTILE|DISPLAY_TRANSTILE);
-							else
-								RoofDraw(scrX+camX,scrY+camY,m->floor,lites,DISPLAY_DRAWME|DISPLAY_ROOFTILE);
-						}
-						else
-							if(GetTerrain(world,m->floor)->flags&TF_TRANS)
-								WallDraw(scrX+camX,scrY+camY,m->wall,m->floor,lites,
-									DISPLAY_DRAWME|DISPLAY_WALLTILE|DISPLAY_TRANSTILE);
-							else
-								WallDraw(scrX+camX,scrY+camY,m->wall,m->floor,lites,
-									DISPLAY_DRAWME|DISPLAY_WALLTILE);
-					}
-					// make wall tiles get drawn in sorted order unlike the floor tiles
-					else
-					{
-						if(GetTerrain(world,m->floor)->flags&TF_TRANS)
-							WallDraw(scrX+camX,scrY+camY,m->wall,m->floor,lites,
-								DISPLAY_DRAWME|DISPLAY_WALLTILE|DISPLAY_TRANSTILE);
-						else
-							WallDraw(scrX+camX,scrY+camY,m->wall,m->floor,lites,
-								DISPLAY_DRAWME|DISPLAY_WALLTILE);
-					}
-				}
-				else
-				{
-					// Shadow wall macro: used to determine both a wall is there and it's not marked shadowless
-#define SHADOW_WALL(WALL) ((WALL) && !(GetTerrain(world, (WALL))->flags&TF_SHADOWLESS))
-					if(config.shading==0)
-					{
-						if(i<width-1 && SHADOW_WALL(map[i+1+j*width].wall))
-							shdw=1;
-						else
-							shdw=0;
-					}
-					else
-					{
-						if(j<height-1 && SHADOW_WALL(map[i+(j+1)*width].wall))
-						{
-							if(i<width-1 && SHADOW_WALL(map[i+1+j*width].wall))
-							{
-								shdw=6;
-							}
-							else
-							{
-								if(i<width-1 && SHADOW_WALL(map[i+1+(j+1)*width].wall))
-									shdw=4;
-								else
-									shdw=7;
-							}
-						}
-						else
-						{
-							if(i<width-1)
-							{
-								if(SHADOW_WALL(map[i+1+(j)*width].wall))
-								{
-									if(j<height-1 && SHADOW_WALL(map[i+1+(j+1)*width].wall))
-										shdw=1;
-									else
-										shdw=2;
-								}
-								else
-								{
-									if(j<height-1 && SHADOW_WALL(map[i+1+(j+1)*width].wall))
-										shdw=3;
-									else
-										shdw=0;
-								}
-							}
-							else
-								shdw=0;
-						}
-					}
-
-					if(j<height-1)
-					{
-						// if there is a wall on the tile below this one, no
-						// point in rendering this floor (unless it is transparent
-						if((!map[i+(j+1)*width].wall) ||
-							(GetTerrain(world,map[i+(j+1)*width].floor)->flags&TF_TRANS))
-							RenderFloorTileFancy(scrX,scrY,m->floor,shdw,lites);
-					}
-					else
-					{
-						// if there's a wall to the right, draw a shadow on this tile
-						RenderFloorTileFancy(scrX,scrY,m->floor,shdw,lites);
-					}
-				}
-			}
-			else
-			{
-				// put black in empty spaces
-				DrawFillBox(scrX,scrY,scrX+TILE_WIDTH-1,scrY+TILE_HEIGHT-1,0);
-			}
-			scrY+=TILE_HEIGHT;
-		}
-		scrX+=TILE_WIDTH;
-	}
-
-	if(this->flags&MAP_STARS)
-	{
-		RenderStars(camX, camY);
-	}
-}
-
-void Map::RenderEdit(world_t *world,int camX,int camY,byte flags)
-{
-	int i,j;
-
-	int tileX,tileY;
-	int ofsX,ofsY;
-	int scrX,scrY;
-	mapTile_t *m;
-	char lite,lites[9];
-	byte shdw;
-
-	camX -= GetDisplayMGL()->GetWidth()/2;
-	camY -= GetDisplayMGL()->GetHeight()/2;
-
-	tileX=(camX/TILE_WIDTH)-1;
-	tileY=(camY/TILE_HEIGHT)-1;
-	ofsX=camX%TILE_WIDTH;
-	ofsY=camY%TILE_HEIGHT;
-
-	scrX=-ofsX-TILE_WIDTH;
-	for(i=tileX;i<tileX+(GetDisplayMGL()->GetWidth()/TILE_WIDTH+4);i++)
-	{
-		scrY=-ofsY-TILE_HEIGHT;
-		for(j=tileY;j<tileY+(GetDisplayMGL()->GetHeight()/TILE_HEIGHT+6);j++)
+		int scrY = -ofsY;
+		// +1 for roofs
+		for(int j = minTileY; j <= (camY + scrHeight) / TILE_HEIGHT + 1; ++j)
 		{
 			if(i>=0 && i<width && j>=0 && j<height)
 			{
@@ -1401,22 +964,21 @@ void Map::RenderEdit(world_t *world,int camX,int camY,byte flags)
 						}
 					}
 
-					RenderItem(scrX+camX+(TILE_WIDTH/2),scrY+camY+(TILE_HEIGHT/2)-1,
-						m->item,lite,flags);
-
 					if(m->wall && (flags&MAP_SHOWWALLS))	// there is a wall on this tile
 					{
 						if(j<height-1)
 						{
 							// if the tile below this one is also a wall, don't waste the
 							// time of drawing the front of this wall
-							if(map[i+(j+1)*width].wall &&
-								(!(GetTerrain(world,map[i+(j+1)*width].floor)->flags&TF_TRANS)))
+							if (
+								map[i+(j+1)*width].wall &&
+								!(GetTerrain(world,map[i+(j+1)*width].floor)->flags&TF_TRANS) &&
+								!((flags & MAP_SHOWSELECT) && !map[i+(j+1)*width].select)
+							)
 							{
 								if(GetTerrain(world,m->floor)->flags&TF_TRANS)
 									RoofDraw(scrX+camX,scrY+camY,m->floor,lites,
 											DISPLAY_DRAWME|DISPLAY_ROOFTILE|DISPLAY_TRANSTILE);
-
 								else
 									RoofDraw(scrX+camX,scrY+camY,m->floor,lites,DISPLAY_DRAWME|DISPLAY_ROOFTILE);
 							}
@@ -1441,7 +1003,8 @@ void Map::RenderEdit(world_t *world,int camX,int camY,byte flags)
 					}
 					else
 					{
-						// Macro is defined in Render above. It's kind of gross I know -SpaceManiac
+						// Shadow wall macro: used to determine both a wall is there and it's not marked shadowless
+#define SHADOW_WALL(WALL) ((WALL) && !(GetTerrain(world, (WALL))->flags&TF_SHADOWLESS))
 						if(config.shading==0)
 						{
 							if(i<width-1 && SHADOW_WALL(map[i+1+j*width].wall))
@@ -1492,14 +1055,18 @@ void Map::RenderEdit(world_t *world,int camX,int camY,byte flags)
 						{
 							// if there is a wall on the tile below this one, no
 							// point in rendering this floor (unless it is transparent
-							if((!map[i+(j+1)*width].wall) ||
-								(GetTerrain(world,map[i+(j+1)*width].floor)->flags&TF_TRANS))
+							if (
+								(!map[i+(j+1)*width].wall) ||
+								(GetTerrain(world,map[i+(j+1)*width].floor)->flags&TF_TRANS) ||
+								((flags & MAP_SHOWSELECT) && !map[i+(j+1)*width].select)
+							)
 							{
 								RenderFloorTileFancy(scrX,scrY,m->floor,shdw,lites);
 							}
 						}
 						else
 						{
+							// if there's a wall to the right, draw a shadow on this tile
 							RenderFloorTileFancy(scrX,scrY,m->floor,shdw,lites);
 						}
 					}
@@ -1513,6 +1080,36 @@ void Map::RenderEdit(world_t *world,int camX,int camY,byte flags)
 			scrY+=TILE_HEIGHT;
 		}
 		scrX+=TILE_WIDTH;
+	}
+
+	if (flags & MAP_SHOWITEMS)
+	{
+		ItemRenderExtents extents = GetItemRenderExtents();
+		int scrX = -ofsX - extents.left * TILE_WIDTH;
+		for (int i = minTileX - extents.left; i <= (camX + scrWidth) / TILE_WIDTH + extents.right; ++i)
+		{
+			int scrY = -ofsY - extents.up * TILE_HEIGHT;
+			for (int j = minTileY - extents.up; j <= (camY + scrHeight) / TILE_HEIGHT + extents.down; ++j)
+			{
+				if (i>=0 && i<width && j>=0 && j<height)
+				{
+					m=&map[i+j*width];
+
+					if (m->item && !((flags&MAP_SHOWSELECT) && !m->select))
+					{
+						RenderItem(
+							scrX+camX+(TILE_WIDTH/2),
+							scrY+camY+(TILE_HEIGHT/2)-1,
+							m->item,
+							(flags & MAP_SHOWLIGHTS) ? m->templight : 0,
+							flags
+						);
+					}
+				}
+				scrY+=TILE_HEIGHT;
+			}
+			scrX+=TILE_WIDTH;
+		}
 	}
 
 	if(this->flags&MAP_STARS)
@@ -2008,7 +1605,7 @@ static const char lvlFlagName[][16] = {
 	"Wavy",
 	"Oxygen Meter",
 };
-static_assert(SDL_arraysize(lvlFlagName) == NUM_LVL_FLAGS, "Must give new level flags a name");
+static_assert(std::size(lvlFlagName) == NUM_LVL_FLAGS, "Must give new level flags a name");
 
 const char* MapFlagName(int flagIndex)
 {

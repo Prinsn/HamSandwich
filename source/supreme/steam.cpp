@@ -331,10 +331,10 @@ public:
 
 	void MountWorkshopContent()
 	{
-		vanilla::VfsStack& vfs_stack = AppdataVfs();
+		vanilla::VfsStack* vfs_stack = Vfs();
 
 		// Unmount all existing Workshop content and remount it in the loop below.
-		erase_if(vfs_stack.mounts, [](const vanilla::Mount& mount) { return mount.meta.steamWorkshopId != 0; });
+		erase_if(vfs_stack->mounts, [](const vanilla::Mount& mount) { return mount.meta.steamWorkshopId != 0; });
 
 		uint32_t subscribedCount = SteamUGC()->GetNumSubscribedItems();
 		subscribedItemIds.resize(subscribedCount);
@@ -365,10 +365,10 @@ public:
 			else if ((state & k_EItemStateInstalled) && (state & k_EItemStateSubscribed) && !(state & k_EItemStateDownloadPending))
 			{
 				char dirname[1024];
-				if (SteamUGC()->GetItemInstallInfo(fileId, nullptr, dirname, SDL_arraysize(dirname), nullptr))
+				if (SteamUGC()->GetItemInstallInfo(fileId, nullptr, dirname, std::size(dirname), nullptr))
 				{
 					SDL_LogDebug(SDL_LOG_CATEGORY_APPLICATION, "workshop: %s", dirname);
-					vfs_stack.push_back(vanilla::open_stdio(dirname), "", { vanilla::VfsSourceKind::Addon, fileId });
+					vfs_stack->push_back(vanilla::open_stdio(dirname), "", { vanilla::VfsSourceKind::Addon, fileId });
 				}
 				else
 				{
@@ -398,17 +398,21 @@ public:
 	STEAM_CALLBACK(SteamManagerImpl, on_subscriptions_change, UserSubscribedItemsListChanged_t)
 	{
 		SDL_LogDebug(SDL_LOG_CATEGORY_APPLICATION, "subscriptions changed for %u", pParam->m_nAppID);
-		// TODO: check that it's our appid?
-		MountWorkshopContent();
+		if (pParam->m_nAppID == SteamUtils()->GetAppID())
+		{
+			MountWorkshopContent();
+		}
 	}
 
 	STEAM_CALLBACK(SteamManagerImpl, on_item_downloaded, DownloadItemResult_t)
 	{
-		// TODO: check that it's our appid?
 		if (pParam->m_eResult == k_EResultOK)
 		{
 			SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION, "workshop download %llu succeeded", pParam->m_nPublishedFileId);
-			MountWorkshopContent();
+			if (pParam->m_unAppID == SteamUtils()->GetAppID())
+			{
+				MountWorkshopContent();
+			}
 		}
 		else
 		{
@@ -424,7 +428,7 @@ public:
 	{
 		// nullptr = use whatever the last thing was (for unpausing)
 		vanilla::VfsMeta meta;
-		if (fullFilename && AppdataVfs().query_bottom(fullFilename, &meta))
+		if (fullFilename && Vfs()->query_bottom(fullFilename, &meta))
 		{
 			playtimeTrackingId = meta.steamWorkshopId;
 		}

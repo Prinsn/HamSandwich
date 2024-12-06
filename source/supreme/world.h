@@ -3,6 +3,7 @@
 
 #include "map.h"
 #include "tile.h"
+#include "string_extras.h"
 
 constexpr int MAX_MAPS = 64;
 
@@ -35,12 +36,6 @@ enum : dword
 	// Flag 1<<22 wouldn't leave room for 1000 tiles, so cannot be added.
 };
 
-struct io_terrain_t
-{
-	word flags;
-	word next;
-};
-
 struct terrain_t
 {
 	dword flags;
@@ -60,12 +55,12 @@ struct world_t
 extern byte keyChainInLevel[MAX_MAPS];
 
 byte NewWorld(world_t *world,MGLDraw *mgl);
-byte LoadWorld(world_t *world,const char *fname);
-byte SaveWorld(world_t *world,const char *fname);
+bool LoadWorld(world_t *world,const char *fname);
+bool SaveWorld(world_t *world,const char *fname);
 void FreeWorld(world_t *world);
 
 void InitWorld(world_t *world);
-bool GetWorldName(const char *fname,char *buffer,char *authbuffer);
+bool GetWorldName(const char *fname, StringDestination name, StringDestination author);
 
 void RepairTileToTile(world_t *w);
 

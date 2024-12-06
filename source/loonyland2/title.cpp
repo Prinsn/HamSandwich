@@ -10,6 +10,8 @@
 #include "gallery.h"
 #include "leveldef.h"
 #include "appdata.h"
+#include "ioext.h"
+
 #if __linux__ || __EMSCRIPTEN__
 #include <unistd.h>
 #endif
@@ -134,7 +136,6 @@ void ClearAddOns(void)
 
 void GetAddOn(char *name,int spot)
 {
-	FILE *f;
 	char line[256];
 	int pos;
 
@@ -144,13 +145,14 @@ void GetAddOn(char *name,int spot)
 	addOnList[spot].dispName[0]='\0';
 	addOnList[spot].filename[0]='\0';
 	sprintf(line,"addons/%s",name);
-	f=AssetOpen(line);
-
+	auto f = AppdataOpen(line);
 	if(!f)
 	{
 		return;
 	}
-	if(fscanf(f,"%[^\n]\n",line)!=EOF)
+
+	SdlRwStream stream(f.get());
+	if(stream.getline(line, std::size(line)))
 	{
 		strncpy(addOnList[spot].dispName,line,32);
 		addOnList[spot].dispName[32]='\0';
@@ -165,7 +167,6 @@ void GetAddOn(char *name,int spot)
 		else
 			strcpy(addOnList[spot].filename,&name[pos+1]);
 	}
-	fclose(f);
 }
 
 void GetAddOns(void)
@@ -204,7 +205,6 @@ void GetAddOns(void)
 
 void GetSavesForMenu(void)
 {
-	FILE *f;
 	int i,n,hole,j;
 	char txt[64];
 	player_t p;
@@ -215,15 +215,16 @@ void GetSavesForMenu(void)
 	for(i=0;i<MAX_CHARS;i++)
 	{
 		sprintf(txt,"profiles/char%02d.loony",i+1);
-		f=AppdataOpen(txt);
+		auto f = AppdataOpen(txt);
 		if(!f && hole==-1)
 		{
 			hole=i;
 		}
 		else if(f)
 		{
-			fread(&p,sizeof(player_t),1,f);
-			fclose(f);
+			SDL_RWread(f, &p,sizeof(player_t),1);
+			f.reset();
+
 			save[n].percentage=CalcPercent(&p);
 			save[n].newbie=0;
 			save[n].realNum=i;

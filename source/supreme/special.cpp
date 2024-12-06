@@ -107,7 +107,8 @@ void DeleteSpecial(int i)
 
 void DefaultTrigger(trigger_t *trig,int x,int y)
 {
-	trig->flags=0;
+	// clear flags like LESS and MORE, but keep NOT and AND
+	trig->flags &= (TF_NOT | TF_AND);
 	trig->x=x;
 	trig->y=y;
 	switch(trig->type)
@@ -362,84 +363,6 @@ void DefaultEffect(effect_t *eff,int x,int y,byte savetext)
 	}
 }
 
-void SaveSpecial(special_t *s,FILE *f)
-{
-	byte numTrig,numEff,b;
-	int i;
-
-	fwrite(&s->x,1,sizeof(byte),f);
-	fwrite(&s->y,1,sizeof(byte),f);
-	fwrite(&s->uses,1,sizeof(byte),f);
-
-	numTrig=0;
-	numEff=0;
-	for(i=0;i<NUM_TRIGGERS;i++)
-		if(s->trigger[i].type)
-		{
-			numTrig=i+1;
-			if(s->trigger[i].type==TRG_EQUATION || s->trigger[i].type==TRG_EQUVAR)
-				numEff=i+1;
-		}
-	for(i=0;i<NUM_EFFECTS;i++)
-		if(s->effect[i].type && numEff<i+1)
-			numEff=i+1;
-
-	b=numTrig+numEff*8;
-	fwrite(&b,1,sizeof(byte),f);	// write a combined number indicating #trigs & #effs
-
-	if(numTrig>0)
-		fwrite(s->trigger,numTrig,sizeof(trigger_t),f);
-	if(numEff>0)
-		fwrite(s->effect,numEff,sizeof(effect_t),f);
-}
-
-void SaveSpecials(FILE *f)
-{
-	int i;
-
-	fwrite(&numSpecials,1,sizeof(byte),f);	// num specials
-	if(numSpecials>0)
-	{
-		for(i=0;i<numSpecials;i++)
-			SaveSpecial(&spcl[i],f);
-	}
-}
-
-void LoadSpecial(special_t *s,FILE *f)
-{
-	byte numTrig,numEff,b;
-
-	memset(s,0,sizeof(special_t));
-
-	fread(&s->x,1,sizeof(byte),f);
-	fread(&s->y,1,sizeof(byte),f);
-	fread(&s->uses,1,sizeof(byte),f);
-
-	fread(&b,1,sizeof(byte),f);	// read a combined number indicating #trigs & #effs
-
-	numTrig=b%8;
-	numEff=b/8;
-
-	if(numTrig>0)
-		fread(s->trigger,numTrig,sizeof(trigger_t),f);
-	if(numEff>0)
-		fread(s->effect,numEff,sizeof(effect_t),f);
-}
-
-void LoadSpecials(FILE *f,special_t *list)
-{
-	int i;
-
-	InitSpecials(list);
-
-	fread(&numSpecials,1,sizeof(byte),f);	// num specials
-	if(numSpecials>0)
-	{
-		for(i=0;i<numSpecials;i++)
-			LoadSpecial(&spcl[i],f);
-	}
-}
-
 int SlideCoord(int coord,int delta,int max)
 {
 	coord+=delta;
@@ -631,7 +554,7 @@ Guy *TaggedMonster(void)
 	return tagged;
 }
 
-byte TeleportGuy(Guy *victim,int x,int y,Map *map,byte noFX)
+static byte TeleportGuy(Guy *victim,int x,int y,Map *map,byte noFX, bool sphinxException = false)
 {
 	if(x<0 || y<0 || x>(map->width*TILE_WIDTH*FIXAMT) || y>(map->height*TILE_HEIGHT*FIXAMT))
 		return 0;	// invalid location
@@ -676,7 +599,7 @@ byte TeleportGuy(Guy *victim,int x,int y,Map *map,byte noFX)
 
 	victim->mapx=x;
 	victim->mapy=y;
-	Telefrag(victim);
+	Telefrag(victim, sphinxException);
 	EventOccur(EVT_STEP,0,x,y,victim);
 	return 1;
 }
@@ -1426,7 +1349,7 @@ void SpecialEffect(special_t *me,Map *map)
 				}
 				break;
 			case EFF_SOUND:
-				MakeNormalCustomSound(me->effect[i].value);
+				MakeNormalSound(me->effect[i].value);
 				break;
 			case EFF_SONG:
 				if(me->effect[i].text[0]=='\0')
@@ -1522,18 +1445,7 @@ void SpecialEffect(special_t *me,Map *map)
 
 					g->item=me->effect[i].value2;
 
-					bool isSphinx = g->aiType==MONS_SPHINX;
-					if(isSphinx)
-					{
-						SetMonsterFlags(MONS_SPHXARM1,MF_ONEFACE|MF_NOMOVE|MF_SPRITEBOX|MF_ENEMYWALK|MF_FREEWALK);
-						SetMonsterFlags(MONS_SPHXARM2,MF_ONEFACE|MF_NOMOVE|MF_SPRITEBOX|MF_ENEMYWALK|MF_FREEWALK);
-					}
-					TeleportGuy(g,me->effect[i].x,me->effect[i].y,map,(me->effect[i].flags&EF_NOFX));
-					if(isSphinx)
-					{
-						SetMonsterFlags(MONS_SPHXARM1,MF_ONEFACE|MF_NOMOVE|MF_SPRITEBOX);
-						SetMonsterFlags(MONS_SPHXARM2,MF_ONEFACE|MF_NOMOVE|MF_SPRITEBOX);
-					}
+					TeleportGuy(g,me->effect[i].x,me->effect[i].y,map,(me->effect[i].flags&EF_NOFX), true);
 				}
 				break;
 			}

@@ -29,9 +29,9 @@
 
 #define NUM_QUESTS 20
 
-char *QuestName(byte quest);
+const char *QuestName(byte quest);
 
-extern rItem randoReward[11];
+extern RandoItem randoReward[11];
 
 typedef struct Convo
 {

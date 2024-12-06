@@ -226,10 +226,10 @@ void SortWorlds(byte field,byte backwards)
 void InputWorld(const char *fname)
 {
 	worldDesc_t newItem;
-	SDL_strlcpy(newItem.fname, fname, SDL_arraysize(newItem.fname));
+	SDL_strlcpy(newItem.fname, fname, std::size(newItem.fname));
 
 	char fullname[64];
-	snprintf(fullname, SDL_arraysize(fullname), "worlds/%s", fname);
+	snprintf(fullname, std::size(fullname), "worlds/%s", fname);
 	GetWorldName(fullname, newItem.name, newItem.author);
 
 	worldData_t *w = GetWorldProgressNoCreate(newItem.fname);
@@ -373,7 +373,7 @@ static void PrepWorld()
 	level=0;
 	noScoresAtAll=0;
 	FetchScores(0);
-	AppdataVfs().query_bottom(s, &worldMeta);
+	Vfs()->query_bottom(s, &worldMeta);
 	SteamManager::Get()->PrepWorldLeaderboard(s);
 }
 
@@ -967,7 +967,7 @@ TASK(Done) UpdateWorldSelect(int *lastTime,MGLDraw *mgl)
 			std::set<dword> seen;
 			std::vector<dword> ordered;
 
-			owned::SDL_RWops input = AssetOpen_SDL_Owned("worlds/levels.dat");
+			owned::SDL_RWops input = AppdataOpen("worlds/levels.dat");
 			for (dword item; SDL_RWread(input, &item, sizeof(dword), 1) == 1;)
 			{
 				seen.insert(item);
@@ -990,12 +990,12 @@ TASK(Done) UpdateWorldSelect(int *lastTime,MGLDraw *mgl)
 				}
 			}
 
-			FILE* output = AssetOpen_Write("worlds/levels.dat");
+			auto output = AppdataOpen_Write("worlds/levels.dat");
 			for (dword item : ordered)
 			{
-				fwrite(&item, sizeof(dword), 1, output);
+				SDL_RWwrite(output, &item, sizeof(dword), 1);
 			}
-			fclose(output);
+			output.reset();
 
 			FetchScores(0);
 		}

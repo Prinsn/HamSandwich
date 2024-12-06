@@ -1208,6 +1208,14 @@ void MonsterDraw(int x,int y,int z,byte type,byte seq,byte frm,byte facing,char 
 	if(!(monsType[type].flags&MF_ONEFACE))
 		v+=facing*monsType[type].framesPerDir;
 
+	if (type == MONS_EVILTREE || type == MONS_EVILTREE2 || type == MONS_EVILTREE3)
+	{
+		// Offset where the sprite is drawn so it's right in the middle of the
+		// tile, in the same place where the item will drop when it dies.
+		x += 3 << FIXSHIFT;
+		y -= 1 << FIXSHIFT;
+	}
+
 	if(isBouapha)
 	{
 		if(player.invinc&1)
@@ -2506,11 +2514,7 @@ void AI_EvilTree(Guy *me,Map *map,world_t *world,Guy *goodguy)
 				me->reload=30*3;
 			}
 		}
-		if(me->seq==ANIM_DIE && me->frm==0 && me->frmTimer<64)
-		{
-			if(player.worldNum==WORLD_NORMAL || player.worldNum==WORLD_REMIX|| player.worldNum==WORLD_RANDOMIZER)
-				map->map[me->mapx+me->mapy*map->width].item=ITM_TREE2;
-		}
+		// dead tree dropping moved to Guy::SeqFinished
 		return;	// can't do nothin' right now
 	}
 
@@ -4324,14 +4328,14 @@ void AI_WaterElder(Guy *me,Map *map,world_t *world,Guy *goodguy)
 	{
 		// fire ice shards
 		MakeSound(SND_ELDERCHARGE,me->x,me->y,SND_CUTOFF,1200);
-		DoMove(me,ANIM_ATTACK,128,1,me->dx,me->dy);
+		DoMove(me,ANIM_ATTACK,128,1,0,0);
 		return;
 	}
 	if(Random(30)==0)
 	{
 		// fire bubbles
 		MakeSound(SND_ELDERSHOOT,me->x,me->y,SND_CUTOFF,1200);
-		DoMove(me,ANIM_A2,128,1,me->dx,me->dy);
+		DoMove(me,ANIM_A2,128,1,0,0);
 		return;
 	}
 

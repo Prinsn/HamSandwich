@@ -1,5 +1,7 @@
 #include "winpch.h"
 #include "items.h"
+#include <algorithm>
+#include <ctype.h>
 #include "display.h"
 #include "player.h"
 #include "repair.h"
@@ -9,9 +11,11 @@
 #include "vars.h"
 #include "goal.h"
 #include "worldstitch.h"
-#include <ctype.h>
+#include "log.h"
+#include "math_extras.h"
+#include "string_extras.h"
 
-item_t baseItems[]={
+static const item_t baseItems[]={
 	{"None",0,0,0,0,0,0,0,0,0,0,0,0,"",0},
 	{"Hammer Up",-2,0,0,0,0,0,
 		0,
@@ -470,7 +474,7 @@ item_t baseItems[]={
 		0,
 		IF_SOLID|IF_BULLETPROOF,
 		IT_BULLETPROOF|IT_CRATE,
-		ITR_MINECART,IE_DESTROY,2,"",SND_BOMBBOOM},
+		ITR_MINECART,IE_DESTROY,2,"",SND_ENERGYBONK},
 	{"Sign 2",-1,-3,81,0,0,0,
 		0,
 		IF_SOLID|IF_BULLETPROOF|IF_SHADOW,
@@ -744,6 +748,8 @@ static word numItems;
 static item_t *items;
 static int totalRare;
 
+static char customSpriteFilename[64] = "";
+
 void InitItems(void)
 {
 	numItems=NUM_ORIGINAL_ITEMS;
@@ -757,6 +763,9 @@ void InitItems(void)
 	glowism=0;
 	SetupRandomItems();
 	rndItem=GetRandomItem();
+
+	ham_strcpy(customSpriteFilename, "");
+	CalculateItemRenderExtents();
 }
 
 void ExitItems(void)
@@ -804,8 +813,12 @@ void DeleteItem(int itm)
 	numItems--;
 }
 
-void SetCustomItemSprites(char* name)
+void SetCustomItemSprites(const char* name)
 {
+	if (!strcmp(customSpriteFilename, name))
+		return;
+	ham_strcpy(customSpriteFilename, name);
+
 	if (customItmSpr) delete customItmSpr;
 
 	customItmSpr=new sprite_set_t();
@@ -816,17 +829,12 @@ void SetCustomItemSprites(char* name)
 	{
 		// failed to load
 		delete customItmSpr;
-		customItmSpr = NULL;
-		return;
+		customItmSpr = nullptr;
 	}
-	else
-	{
-		// great success!
-		return;
-	}
+	CalculateItemRenderExtents();
 }
 
-void DetectCustomItemSprites(world_t *world)
+static void DetectCustomItemSprites(const world_t *world)
 {
 	// extract filename out of first special if possible
 	special_t* special = world->map[0]->special;
@@ -1058,7 +1066,7 @@ int GetTotalRarity(void)
 	return totalRare;
 }
 
-void SaveItems(FILE *f)
+void SaveItems(SDL_RWops *f)
 {
 	int i;
 	word changedItems;
@@ -1072,29 +1080,33 @@ void SaveItems(FILE *f)
 			changedItems++;
 	}
 
-	fwrite(&changedItems,1,sizeof(word),f);
+	SDL_RWwrite(f,&changedItems,1,sizeof(word));
 	for(i=0;i<NUM_ORIGINAL_ITEMS;i++)
 	{
 		if(memcmp(&items[i],&baseItems[i],sizeof(item_t)))
 		{
 			// this item is changed, write it out
 			b=(byte)i;
-			fwrite(&b,1,sizeof(byte),f);	// write the item number
-			fwrite(&items[i],1,sizeof(item_t),f);
+			SDL_RWwrite(f,&b,1,sizeof(byte));	// write the item number
+			item_t item = items[i];
+			item.sound = SoundToDescIndex(item.sound);
+			SDL_RWwrite(f,&item,1,sizeof(item_t));
 		}
 	}
 	if(numItems>NUM_ORIGINAL_ITEMS)
 	{
 		b=255;	// indicating custom items are beginning here
-		fwrite(&b,1,sizeof(byte),f);
+		SDL_RWwrite(f,&b,1,sizeof(byte));
 		for(i=NUM_ORIGINAL_ITEMS;i<numItems;i++)
 		{
-			fwrite(&items[i],1,sizeof(item_t),f);
+			item_t item = items[i];
+			item.sound = SoundToDescIndex(item.sound);
+			SDL_RWwrite(f,&item,1,sizeof(item_t));
 		}
 	}
 }
 
-void LoadItems(FILE *f)
+void LoadItems(SDL_RWops *f)
 {
 	int i;
 	word changedItems;
@@ -1104,7 +1116,7 @@ void LoadItems(FILE *f)
 	ExitItems();
 	InitItems();
 
-	fread(&changedItems,1,sizeof(word),f);
+	SDL_RWread(f,&changedItems,1,sizeof(word));
 
 	getNumber=1;
 	for(i=0;i<changedItems;i++)
@@ -1112,14 +1124,15 @@ void LoadItems(FILE *f)
 		if(getNumber)
 		{
 			curItem=0;
-			fread(&curItem,1,sizeof(byte),f);
+			SDL_RWread(f,&curItem,1,sizeof(byte));
 			if(curItem==255)
 			{
 				getNumber=0;
 				curItem=NUM_ORIGINAL_ITEMS;
 			}
 		}
-		fread(&items[curItem],1,sizeof(item_t),f);
+		SDL_RWread(f,&items[curItem],1,sizeof(item_t));
+		items[curItem].sound = DescIndexToSound(items[curItem].sound);
 		curItem++;
 	}
 
@@ -1129,7 +1142,7 @@ void LoadItems(FILE *f)
 		numItems=curItem;
 }
 
-byte AppendItems(FILE *f)
+byte AppendItems(SDL_RWops *f)
 {
 	int i;
 	word changedItems;
@@ -1139,14 +1152,14 @@ byte AppendItems(FILE *f)
 
 	stitchItemOffset=numItems;
 
-	fread(&changedItems,1,sizeof(word),f);
+	SDL_RWread(f,&changedItems,1,sizeof(word));
 
 	getNumber=1;
 	for(i=0;i<changedItems;i++)
 	{
 		if(getNumber)
 		{
-			fread(&curItem,1,sizeof(byte),f);
+			SDL_RWread(f,&curItem,1,sizeof(byte));
 			if(curItem==255)
 			{
 				getNumber=0;
@@ -1154,22 +1167,24 @@ byte AppendItems(FILE *f)
 			}
 		}
 		if(curItem<NUM_ORIGINAL_ITEMS)
-			fread(&garbage,1,sizeof(item_t),f);	// throw away any mods of regular items
+			SDL_RWread(f,&garbage,1,sizeof(item_t));	// throw away any mods of regular items
 		else
 		{
-			fread(&items[curItem],1,sizeof(item_t),f);
+			SDL_RWread(f,&items[curItem],1,sizeof(item_t));
 			curItem++;
 			numItems++;
 		}
 		if(curItem>=MAX_ITEMS)
 		{
+			CalculateItemRenderExtents();
 			return 0;
 		}
 	}
+	CalculateItemRenderExtents();
 	return 1;
 }
 
-item_t *GetBaseItem(int type)
+const item_t *GetBaseItem(int type)
 {
 	if(type<0 || type>=NUM_ORIGINAL_ITEMS)
 		return NULL;
@@ -1669,7 +1684,7 @@ void MoveMovableItem(int x,int y,Map *map,world_t *world)
 	}
 	if(yes)
 	{
-		MakeCustomSound(items[type].sound,(x*TILE_WIDTH+TILE_WIDTH/2)*FIXAMT,(y*TILE_HEIGHT+TILE_HEIGHT/2)*FIXAMT,SND_CUTOFF,1000);
+		MakeSound(items[type].sound,(x*TILE_WIDTH+TILE_WIDTH/2)*FIXAMT,(y*TILE_HEIGHT+TILE_HEIGHT/2)*FIXAMT,SND_CUTOFF,1000);
 		if(items[type].msg[0])
 			NewMessage(items[type].msg,75,0);
 	}
@@ -1706,7 +1721,7 @@ byte InteractWithItem(Guy *me,mapTile_t *m,int x,int y)
 
 		if(result==1)
 		{
-			MakeCustomSound(items[type].sound,(x*TILE_WIDTH+TILE_WIDTH/2)*FIXAMT,(y*TILE_HEIGHT+TILE_HEIGHT/2)*FIXAMT,SND_CUTOFF,1000);
+			MakeSound(items[type].sound,(x*TILE_WIDTH+TILE_WIDTH/2)*FIXAMT,(y*TILE_HEIGHT+TILE_HEIGHT/2)*FIXAMT,SND_CUTOFF,1000);
 			if(items[type].msg[0])
 				NewMessage(items[type].msg,75,0);
 
@@ -1731,7 +1746,7 @@ byte InteractWithItem(Guy *me,mapTile_t *m,int x,int y)
 	{
 		if(TriggerItem(me,m,x,y))
 		{
-			MakeCustomSound(items[type].sound,(x*TILE_WIDTH+TILE_WIDTH/2)*FIXAMT,(y*TILE_HEIGHT+TILE_HEIGHT/2)*FIXAMT,SND_CUTOFF,1000);
+			MakeSound(items[type].sound,(x*TILE_WIDTH+TILE_WIDTH/2)*FIXAMT,(y*TILE_HEIGHT+TILE_HEIGHT/2)*FIXAMT,SND_CUTOFF,1000);
 			if(items[type].msg[0])
 				NewMessage(items[type].msg,75,0);
 		}
@@ -1741,7 +1756,7 @@ byte InteractWithItem(Guy *me,mapTile_t *m,int x,int y)
 	{
 		if(TriggerItem(me,m,x,y))
 		{
-			MakeCustomSound(items[type].sound,(x*TILE_WIDTH+TILE_WIDTH/2)*FIXAMT,(y*TILE_HEIGHT+TILE_HEIGHT/2)*FIXAMT,SND_CUTOFF,1000);
+			MakeSound(items[type].sound,(x*TILE_WIDTH+TILE_WIDTH/2)*FIXAMT,(y*TILE_HEIGHT+TILE_HEIGHT/2)*FIXAMT,SND_CUTOFF,1000);
 			if(items[type].msg[0])
 				NewMessage(items[type].msg,75,0);
 		}
@@ -1768,7 +1783,7 @@ byte BulletHitItem(byte bulType,mapTile_t *m,int x,int y)
 	{
 		if(TriggerItem(NULL,m,x,y))
 		{
-			MakeCustomSound(items[type].sound,(x*TILE_WIDTH+TILE_WIDTH/2)*FIXAMT,(y*TILE_HEIGHT+TILE_HEIGHT/2)*FIXAMT,SND_CUTOFF,1000);
+			MakeSound(items[type].sound,(x*TILE_WIDTH+TILE_WIDTH/2)*FIXAMT,(y*TILE_HEIGHT+TILE_HEIGHT/2)*FIXAMT,SND_CUTOFF,1000);
 			if(items[type].msg[0])
 				NewMessage(items[type].msg,75,0);
 		}
@@ -1782,7 +1797,7 @@ byte BulletHitItem(byte bulType,mapTile_t *m,int x,int y)
 			if(profile.progress.grassChopped>=100)
 				CompleteGoal(89);
 
-			MakeCustomSound(items[type].sound,(x*TILE_WIDTH+TILE_WIDTH/2)*FIXAMT,(y*TILE_HEIGHT+TILE_HEIGHT/2)*FIXAMT,SND_CUTOFF,1000);
+			MakeSound(items[type].sound,(x*TILE_WIDTH+TILE_WIDTH/2)*FIXAMT,(y*TILE_HEIGHT+TILE_HEIGHT/2)*FIXAMT,SND_CUTOFF,1000);
 			if(items[type].msg[0])
 				NewMessage(items[type].msg,75,0);
 		}
@@ -1801,7 +1816,7 @@ void UpdateItem(mapTile_t *m,int width,int offset)
 		y=offset/width;
 		if(TriggerItem(NULL,m,x,y))
 		{
-			MakeCustomSound(items[m->item].sound,(x*TILE_WIDTH+TILE_WIDTH/2)*FIXAMT,(y*TILE_HEIGHT+TILE_HEIGHT/2)*FIXAMT,SND_CUTOFF,1000);
+			MakeSound(items[m->item].sound,(x*TILE_WIDTH+TILE_WIDTH/2)*FIXAMT,(y*TILE_HEIGHT+TILE_HEIGHT/2)*FIXAMT,SND_CUTOFF,1000);
 			if(items[m->item].msg[0])
 				NewMessage(items[m->item].msg,75,0);
 		}
@@ -1839,11 +1854,87 @@ static const char pwrUpName[][32] = {
 	"Hammer Enhance",
 	"Poison",
 };
-static_assert(SDL_arraysize(pwrUpName) == MAX_POWERUP, "Must give new powerups a name");
+static_assert(std::size(pwrUpName) == MAX_POWERUP, "Must give new powerups a name");
 
 const char *GetPowerupName(int powerup)
 {
 	if (powerup >= 0 && powerup < MAX_POWERUP)
 		return pwrUpName[powerup];
 	return "???";
+}
+
+static ItemRenderExtents extents;
+
+void CalculateItemRenderExtents()
+{
+	// Calculate the union bounding box of item sprites so we know how far away
+	// to search for items to draw, with no pop-in and minimal overdraw.
+	SDL_Rect everything = {};
+	for (int type = 0; type < numItems; ++type)
+	{
+		SDL_Rect rect;
+		if (items[type].flags & IF_TILE)
+		{
+			rect.x = items[type].xofs;
+			rect.y = items[type].yofs+1;
+			rect.w = 32;
+			rect.h = 32;
+		}
+		else
+		{
+			sprite_t* spr;
+
+			if (items[type].flags & IF_USERJSP)
+			{
+				sprite_set_t* custom = CustomItemSprites();
+				if (custom)
+					spr = custom->GetSprite(items[type].sprNum < custom->GetCount() ? items[type].sprNum : 0);
+				else
+					spr = itmSpr->GetSprite(8); // red X indicating invalid custom JSP file
+			}
+			else
+				spr = itmSpr->GetSprite(items[type].sprNum);
+
+			if (spr)
+			{
+				// Use precise sprite boundaries.
+				rect.x = items[type].xofs - spr->ofsx;
+				rect.y = 0 - spr->ofsy - std::clamp(-items[type].yofs+1, -DISPLAY_YBORDER, DISPLAY_YBORDER);
+				rect.w = spr->width;
+				rect.h = spr->height;
+
+				SDL_UnionRect(&everything, &rect, &everything);
+
+				if(items[type].flags&IF_SHADOW)
+				{
+					// Use precise shadow sprite boundaries.
+					rect.x = items[type].xofs - spr->ofsx - spr->height/2;
+					rect.y = 0 - spr->ofsy/2 - std::clamp(-items[type].yofs+1, -DISPLAY_YBORDER, DISPLAY_YBORDER);
+					rect.w = spr->height/2 + spr->width;
+					rect.h = spr->height/2;
+
+					SDL_UnionRect(&everything, &rect, &everything);
+				}
+			}
+		}
+	}
+
+	// Bounds are reversed here, because the further left from an item's origin
+	// it extends, the further right off the edge of the screen we need to seek
+	// items to draw. The minimums are for tile/wall rendering.
+	extents.left = floor_div(everything.x + everything.w + TILE_WIDTH/2, TILE_WIDTH).quot;
+	extents.right = -floor_div(everything.x + TILE_WIDTH/2, TILE_WIDTH).quot;
+	extents.up = floor_div(everything.y + everything.h + TILE_HEIGHT/2, TILE_HEIGHT).quot;
+	extents.down = -floor_div(everything.y + TILE_HEIGHT/2, TILE_HEIGHT).quot;
+
+#ifndef NDEBUG
+	LogDebug("item bounds: (x: %d, y: %d, w: %d, h: %d) tile spread: (x: %+d to %+d, y: %+d to %+d), inclusive",
+		everything.x, everything.y, everything.w, everything.h,
+		-extents.left, extents.right, -extents.up, extents.down);
+#endif
+}
+
+ItemRenderExtents GetItemRenderExtents()
+{
+	return extents;
 }
