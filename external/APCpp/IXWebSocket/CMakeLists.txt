@@ -236,8 +236,8 @@ endif()
 option(USE_ZLIB "Enable zlib support" TRUE)
 
 if (USE_ZLIB)
-  find_package(ZLIB REQUIRED)
-  target_link_libraries(ixwebsocket PRIVATE ZLIB::ZLIB)
+  #find_package(ZLIB REQUIRED)
+  target_link_libraries(ixwebsocket PRIVATE z)
 
   target_compile_definitions(ixwebsocket PUBLIC IXWEBSOCKET_USE_ZLIB)
 endif()
