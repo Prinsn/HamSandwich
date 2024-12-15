@@ -9,6 +9,9 @@ ITM_FREQ = 5
 REG_NAME = 0
 REG_REAL = 1
 REG_MAP = 2
+REG_MAPID = 3
+REG_XCOORD = 4
+REG_YCOORD = 5
 
 LOC_NAME = 0
 LOC_TYPE = 1
@@ -22,6 +25,7 @@ LOC_SPEC2ID = 8
 LOC_REGION = 9
 LOC_COMMENT = 10
 LOC_LOGIC = 11
+LOC_OVERRIDE = 12
 
 ENT_DISABLE = 0
 ENT_SOURCE = 1
@@ -32,12 +36,15 @@ ENT_LOAD = 5
 ENT_LOGIC = 6
 ENT_COMMENTS = 7
 
+TILE_XSIZE = 32
+TILE_YSIZE = 24
 
 
 INPUT_DEFINES = "CSV/Defines.csv"
 INPUT_ITEMS = "CSV/Items.csv"
 INPUT_REGIONS = "CSV/Regions.csv"
 INPUT_LOCATIONS = "CSV/Locations.csv"
+INPUT_LOCATIONS_TRACKER = "CSV/TrackerLocations.csv"
 INPUT_ENTRANCES = "CSV/Entrances.csv"
 
 PYTHON_DEFINES = "Python/Defines.py"
@@ -48,5 +55,6 @@ PYTHON_RULES = "Python/rules_data.py"
 PYTHON_ENTRANCES = "Python/entrance_data.py"
 
 TRACKER_ITEMS = "Poptracker/items.jsonc"
+TRACKER_LOCATIONS = "Poptracker/locations.jsonc"
 
 CLIENT_LOCATIONS = "HamSandwich/AP_Locations.h"
